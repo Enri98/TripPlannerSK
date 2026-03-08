@@ -1,0 +1,9 @@
+{
+    "name": "ActivityAgent",
+    "description": "Suggests activities based on the weather for a given city.",
+    "endpoint": "http://localhost:8080/task",
+    "capabilities": [
+        "activity_suggestion"
+    ],
+    "version": "1.0.0"
+}
