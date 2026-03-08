@@ -13,3 +13,5 @@ User message:
 
 Your response:
 "[{\"name\": \"Vatican Museums\", \"type\": \"Indoor\"}]"
+
+User Input: {{$user_message}}

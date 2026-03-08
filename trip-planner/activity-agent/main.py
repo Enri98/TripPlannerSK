@@ -103,9 +103,27 @@ async def suggest_activity(request: TaskRequest):
 
     # --- Format and Return Response ---
     try:
-        suggested_activities = json.loads(str(result))
-    except json.JSONDecodeError:
-        suggested_activities = [] # fallback to an empty list if JSON is malformed
+        result_str = str(result)
+        # Clean the response string
+        if '```json' in result_str:
+            result_str = result_str.split('```json')[1].split('```')[0].strip()
+        
+        suggested_activities = json.loads(result_str)
+        
+    except json.JSONDecodeError as e:
+        # Log the error for debugging
+        print(f"JSONDecodeError: {e}")
+        print(f"Malformed response: {str(result)}")
+        
+        # Return a JSON-RPC error response
+        return {
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32603, 
+                "message": "Internal error: Failed to decode JSON from AI response."
+            },
+            "id": request.id
+        }
 
     return {
         "jsonrpc": "2.0",
