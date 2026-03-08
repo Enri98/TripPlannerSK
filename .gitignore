@@ -1,7 +1,10 @@
 .venv/
-.env/
+.env
 __pycache__/
 *.pyc
 *.pyo
 env/
 venv/
+
+exporter.py
+project_export.txt
