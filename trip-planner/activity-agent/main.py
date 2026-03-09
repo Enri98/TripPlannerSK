@@ -2,10 +2,12 @@ import json
 import os
 from pathlib import Path
 from typing import Optional
+
+from anyio import Path as AnyioPath
 from fastapi import FastAPI, Response
 from pydantic import BaseModel
-import uvicorn
 import semantic_kernel as sk
+import uvicorn
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
 from dotenv import load_dotenv
 from semantic_kernel.functions import KernelArguments
@@ -30,21 +32,31 @@ class TaskRequest(BaseModel):
 BASE_DIR = Path(__file__).parent
 AGENT_CARD_PATH = BASE_DIR / "agent_card.json"
 INSTRUCTIONS_PATH = BASE_DIR / "instructions.md"
+AGENT_CARD_CONTENT: dict = {}
+SYSTEM_PROMPT: str = ""
 
 # --- Load Environment Variables ---
 load_dotenv(dotenv_path=BASE_DIR.parent.parent / ".env", override=True)
 
 # --- Endpoints ---
+@app.on_event("startup")
+async def startup_event() -> None:
+    global AGENT_CARD_CONTENT, SYSTEM_PROMPT
+
+    card_raw = await AnyioPath(AGENT_CARD_PATH).read_text(encoding="utf-8")
+    instructions_raw = await AnyioPath(INSTRUCTIONS_PATH).read_text(encoding="utf-8")
+
+    AGENT_CARD_CONTENT = json.loads(card_raw)
+    SYSTEM_PROMPT = instructions_raw
+
 
 @app.get("/.well-known/agent-card.json")
 async def get_agent_card():
     """
     Serves the agent's A2A card for discovery.
     """
-    if AGENT_CARD_PATH.exists():
-        with open(AGENT_CARD_PATH, "r") as f:
-            agent_card_content = json.load(f)
-        return Response(content=json.dumps(agent_card_content, indent=4), media_type="application/json")
+    if AGENT_CARD_CONTENT:
+        return Response(content=json.dumps(AGENT_CARD_CONTENT, indent=4), media_type="application/json")
     return Response(status_code=404, content="Agent card not found.")
 
 @app.post("/task")
@@ -76,15 +88,11 @@ async def suggest_activity(request: TaskRequest):
             "id": request.id
         }
 
-    # --- Load System Prompt ---
-    with open(INSTRUCTIONS_PATH, "r") as f:
-        system_prompt = f.read()
-
     # 3. Register Function from prompt
     chat_function = kernel.add_function(
         function_name="chat",
         plugin_name="ActivityPlugin",
-        prompt=system_prompt,
+        prompt=SYSTEM_PROMPT,
     )
 
     try:
