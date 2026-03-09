@@ -15,14 +15,16 @@ from plugins.discovery_plugin import DiscoveryPlugin
 
 LOGGER = logging.getLogger("trip_orchestrator")
 SYSTEM_INSTRUCTIONS = (
-    "You are a strictly data-driven Orchestrator. "
-    "1. Call WeatherMcp for the city. "
-    "2. Pass EXACT weather string and city to ActivityAgent. "
-    "3. Output ONLY a strictly structured JSON object with keys weather_data and activity_suggestions. "
+    "You are the Trip Director. "
+    "1. Get weather. "
+    "2. Get activities. "
+    "3. Get restaurant recommendations. "
+    "4. Output a strictly structured JSON object containing ALL three categories: "
+    "weather_data, activity_suggestions, and restaurant_recommendations. "
     "Do not write prose. "
     "If the user asks for a trip on a specific date other than today, check if the Weather Tool supports it. "
     "If not, inform the user you can only plan for today. "
-    "If a tool fails, report the error JSON. NEVER generate activities yourself."
+    "If a tool fails, report the error JSON."
 )
 
 
@@ -51,14 +53,22 @@ def build_kernel() -> Kernel:
     )
     kernel.add_service(chat_service)
 
-    kernel.add_plugin(DiscoveryPlugin(), plugin_name="ActivityService")
+    kernel.add_plugin(DiscoveryPlugin(), plugin_name="TravelServices")
 
     return kernel
 
 
 def present_itinerary(raw_json: str) -> None:
+    cleaned = raw_json.strip()
+    if "```json" in cleaned:
+        cleaned = cleaned.split("```json", 1)[1]
+        cleaned = cleaned.split("```", 1)[0].strip()
+    elif "```" in cleaned:
+        cleaned = cleaned.split("```", 1)[1]
+        cleaned = cleaned.split("```", 1)[0].strip()
+
     try:
-        parsed = json.loads(raw_json)
+        parsed = json.loads(cleaned)
     except json.JSONDecodeError:
         print("----- RAW AGENT OUTPUT -----")
         print(raw_json)
@@ -71,10 +81,18 @@ def present_itinerary(raw_json: str) -> None:
 
     weather_data = parsed.get("weather_data", parsed.get("weather", "N/A")) if isinstance(parsed, dict) else "N/A"
     activities = parsed.get("activity_suggestions", []) if isinstance(parsed, dict) else []
+    restaurants = parsed.get("restaurant_recommendations", []) if isinstance(parsed, dict) else []
     city = "Unknown"
 
     if isinstance(parsed, dict):
-        city = parsed.get("city") or parsed.get("destination") or "Unknown"
+        city = (
+            parsed.get("city")
+            or parsed.get("destination")
+            or parsed.get("trip_city")
+            or parsed.get("location")
+            or parsed.get("city_name")
+            or "Unknown"
+        )
 
     print(f"--- YOUR TRIP TO {city} ---")
     print(f"Current Weather: {weather_data}")
@@ -90,6 +108,20 @@ def present_itinerary(raw_json: str) -> None:
             kind = item.get("type", "Unknown")
             description = item.get("description", "No description")
             print(f"- {name} [{kind}] - {description}")
+        else:
+            print(f"- {item}")
+
+    print("Recommended Restaurants:")
+    if not isinstance(restaurants, list) or not restaurants:
+        print("- No restaurant recommendations available.")
+        return
+
+    for item in restaurants:
+        if isinstance(item, dict):
+            name = item.get("name", "Unnamed restaurant")
+            kind = item.get("type", "Unknown")
+            price_range = item.get("price_range", "N/A")
+            print(f"- {name} [{kind}] - Price: {price_range}")
         else:
             print(f"- {item}")
 

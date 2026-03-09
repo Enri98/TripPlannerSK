@@ -1,68 +1,84 @@
-# Documentazione Progetto
+# Trip Planner Agentico (Semantic Kernel 1.40)
 
-Questo progetto è composto da due servizi principali: un server meteo e un pianificatore di viaggi.
+Questo progetto implementa un trip planner multi-agente con orchestrazione automatica tramite Semantic Kernel 1.40.
 
 ## Architettura
 
-L'architettura è basata su microservizi:
+Componenti principali:
 
-1.  **Server Meteo (`mcp-weather-server`)**: Un servizio Python che fornisce dati meteorologici.
-2.  **Pianificatore di Viaggi (`trip-planner`)**: Un servizio che include un "Activity Agent" per suggerire attività basate sul meteo.
+1. `mcp-weather-server`
+- Server MCP (FastMCP) per meteo.
+- Tool principale: `get_weather(city, date="today")`.
+- Vincolo temporale: per date future restituisce `Error: I can only provide weather for today.`.
 
-## Come Eseguire il Progetto
+2. `trip-planner/activity-agent`
+- Agente A2A (FastAPI, porta `8081`).
+- Espone `/.well-known/agent-card.json` e `/task`.
+- Suggerisce attivita in base a citta + meteo.
 
-Per eseguire i servizi, segui questi passaggi.
+3. `trip-planner/restaurant-agent`
+- Agente A2A (FastAPI, porta `8082`).
+- Espone `/.well-known/agent-card.json` e `/task`.
+- Suggerisce ristoranti in base a citta + preferenza cucina.
 
-### 1. Eseguire il Server Meteo
+4. `trip-planner/orchestrator`
+- Console app con `ChatCompletionAgent` (SK 1.40).
+- Usa `FunctionChoiceBehavior.Auto(auto_invoke=True)`.
+- Usa MCP per il meteo + DiscoveryPlugin per chiamare ActivityAgent e RestaurantAgent.
 
-Apri un terminale e posizionati nella cartella `mcp-weather-server`:
+## Prerequisiti
 
-```bash
+- Python 3.11+
+- Virtual environment condiviso in `trip-planner/.venv`
+- Variabili in `.env` (root progetto):
+  - `AZURE_OPENAI_ENDPOINT`
+  - `AZURE_OPENAI_API_KEY`
+  - `AZURE_OPENAI_DEPLOYMENT`
+  - `AZURE_OPENAI_MODEL`
+  - `API_VERSION`
+
+## Avvio rapido (Windows / PowerShell)
+
+Apri 4 terminali dalla root del progetto `ESAME/`.
+
+### Terminale 1: Weather MCP Server
+
+```powershell
 cd mcp-weather-server
+..\trip-planner\.venv\Scripts\python.exe .\server.py
 ```
 
-Attiva l'ambiente virtuale:
+### Terminale 2: Activity Agent
 
-```bash
-# Su Windows
-.venv\Scripts\activate
-```
-
-Installa le dipendenze:
-
-```bash
-pip install -r requirements.txt
-```
-
-Avvia il server:
-
-```bash
-python server.py
-```
-
-### 2. Eseguire il Pianificatore di Viaggi
-
-Apri un secondo terminale e posizionati nella cartella `trip-planner/activity-agent`:
-
-```bash
+```powershell
 cd trip-planner\activity-agent
+..\.venv\Scripts\python.exe .\main.py
 ```
 
-Attiva l'ambiente virtuale (condiviso con il trip-planner):
+### Terminale 3: Restaurant Agent
 
-```bash
-# Su Windows
-..\.venv\Scripts\activate
+```powershell
+cd trip-planner\restaurant-agent
+..\.venv\Scripts\python.exe .\main.py
 ```
 
-Installa le dipendenze:
+### Terminale 4: Orchestrator Console
 
-```bash
-pip install -r ..equirements.txt
+```powershell
+cd trip-planner\orchestrator
+..\.venv\Scripts\python.exe .\main.py
 ```
 
-Avvia il server dell'agente:
+## Flusso logico
 
-```bash
-python main.py
-```
+1. L'utente inserisce richiesta viaggio in console.
+2. Orchestrator chiama `WeatherMcp`.
+3. Orchestrator chiama `ActivityAgent` via discovery A2A (`8081`).
+4. Orchestrator chiama `RestaurantAgent` via discovery A2A (`8082`).
+5. Orchestrator produce JSON strutturato e lo presenta in formato leggibile.
+
+## Note operative
+
+- Il parser UI dell'orchestrator gestisce anche risposte JSON dentro blocchi Markdown (```json ... ```).
+- Se un agente A2A non e raggiungibile, il plugin restituisce un errore JSON strutturato.
+- L'orchestrator comunica con gli agenti solo tramite `DiscoveryPlugin`.

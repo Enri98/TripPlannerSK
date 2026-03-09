@@ -1,0 +1,9 @@
+{
+  "name": "RestaurantAgent",
+  "description": "Suggests restaurants for a city and cuisine preference.",
+  "endpoint": "http://localhost:8082/task",
+  "capabilities": [
+    "restaurant_recommendation"
+  ],
+  "version": "1.0.0"
+}
