@@ -9,7 +9,8 @@ from semantic_kernel import Kernel
 from semantic_kernel.agents import ChatCompletionAgent
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
 from semantic_kernel.connectors.mcp import MCPStdioPlugin
-from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
+from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChatPromptExecutionSettings
+from semantic_kernel.functions import KernelArguments
 
 from plugins.discovery_plugin import DiscoveryPlugin
 
@@ -19,6 +20,8 @@ SYSTEM_INSTRUCTIONS = (
     "1. Get weather. "
     "2. Get activities. "
     "3. Get restaurant recommendations. "
+    "You must obtain the weather data from the WeatherMcp tool before calling the ActivityAgent. "
+    "Never use placeholders like 'today' or 'clear' for the weather parameter; use only the exact output from the weather tool. "
     "4. Output a strictly structured JSON object containing ALL three categories: "
     "weather_data, activity_suggestions, and restaurant_recommendations. "
     "Do not write prose. "
@@ -171,7 +174,14 @@ async def run_console() -> None:
             if not user_input:
                 continue
 
-            response = await agent.get_response(messages=user_input)
+            execution_settings = AzureChatPromptExecutionSettings(
+                tool_choice="auto",
+                parallel_tool_calls=False,
+            )
+            response = await agent.get_response(
+                messages=user_input,
+                arguments=KernelArguments(settings=execution_settings),
+            )
             content = str(response.message.content)
             print("\n----- RAW JSON RESPONSE -----")
             print(content)
