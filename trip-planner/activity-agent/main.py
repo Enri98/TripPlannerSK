@@ -6,11 +6,12 @@ from typing import Optional
 from anyio import Path as AnyioPath
 from fastapi import FastAPI, Response
 from pydantic import BaseModel
-import semantic_kernel as sk
 import uvicorn
-from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
+from semantic_kernel import Kernel
+from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
+from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChatPromptExecutionSettings
 from dotenv import load_dotenv
-from semantic_kernel.functions import KernelArguments
+from semantic_kernel.functions import KernelArguments, kernel_function
 
 from memory import ACTIVITIES_DB
 
@@ -34,6 +35,40 @@ AGENT_CARD_PATH = BASE_DIR / "agent_card.json"
 INSTRUCTIONS_PATH = BASE_DIR / "instructions.md"
 AGENT_CARD_CONTENT: dict = {}
 SYSTEM_PROMPT: str = ""
+
+
+class ActivitySearchPlugin:
+    @staticmethod
+    def _normalize(text: str) -> str:
+        return text.strip().lower()
+
+    @staticmethod
+    def _resolve_city_key(city: str) -> Optional[str]:
+        target = city.strip().lower()
+        for key in ACTIVITIES_DB:
+            if key.lower() == target:
+                return key
+        return None
+
+    @kernel_function(description="Returns activities filtered by city and weather.")
+    async def get_activities(self, city: str, weather: str) -> list[dict]:
+        city_key = self._resolve_city_key(city)
+        if not city_key:
+            return []
+
+        normalized_weather = self._normalize(weather)
+        activities = ACTIVITIES_DB.get(city_key, [])
+
+        bad_weather_markers = {"rain", "storm", "snow", "thunder", "wind"}
+        good_weather_markers = {"sun", "clear", "warm", "hot"}
+
+        if any(marker in normalized_weather for marker in bad_weather_markers):
+            return [item for item in activities if item.get("type", "").lower() == "indoor"]
+
+        if any(marker in normalized_weather for marker in good_weather_markers):
+            return [item for item in activities if item.get("type", "").lower() == "outdoor"]
+
+        return activities
 
 # --- Load Environment Variables ---
 load_dotenv(dotenv_path=BASE_DIR.parent.parent / ".env", override=True)
@@ -68,7 +103,7 @@ async def suggest_activity(request: TaskRequest):
     weather = request.params.weather
 
     # 1. Init Kernel
-    kernel = sk.Kernel()
+    kernel = Kernel()
 
     # 2. Add AI Service (Verified Stable v1.x Syntax)
     ai_service = AzureChatCompletion(
@@ -79,9 +114,10 @@ async def suggest_activity(request: TaskRequest):
     )
     # Register the service directly. The kernel handles it as the default.
     kernel.add_service(ai_service)
+    kernel.add_plugin(ActivitySearchPlugin(), plugin_name="ActivitySearch")
 
     # --- Error Handling for Unsupported City ---
-    if city not in ACTIVITIES_DB:
+    if ActivitySearchPlugin._resolve_city_key(city) is None:
         return {
             "jsonrpc": "2.0",
             "error": {"code": -32602, "message": "City not supported"},
@@ -96,14 +132,16 @@ async def suggest_activity(request: TaskRequest):
     )
 
     try:
-        # Prepare context
-        activities = ACTIVITIES_DB.get(city, [])
-        user_input_str = f"The weather in {city} is {weather}. Activities: {json.dumps(activities)}"
+        execution_settings = AzureChatPromptExecutionSettings(
+            tool_choice="auto",
+            parallel_tool_calls=False,
+            function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
+        )
 
         # Invoke with variable binding
         result = await kernel.invoke(
             chat_function,
-            KernelArguments(user_message=user_input_str),
+            KernelArguments(settings=execution_settings, city=city, weather=weather),
         )
         result_str = str(result)
     except Exception as e:
