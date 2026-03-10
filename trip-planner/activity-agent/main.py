@@ -58,9 +58,13 @@ class ActivitySearchPlugin:
 
         normalized_weather = self._normalize(weather)
         activities = ACTIVITIES_DB.get(city_key, [])
+        neutral_weather_values = {"unknown", "n/a", "na", "none"}
 
         bad_weather_markers = {"rain", "storm", "snow", "thunder", "wind"}
         good_weather_markers = {"sun", "clear", "warm", "hot"}
+
+        if normalized_weather in neutral_weather_values:
+            return activities
 
         if any(marker in normalized_weather for marker in bad_weather_markers):
             return [item for item in activities if item.get("type", "").lower() == "indoor"]

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -20,14 +21,15 @@ SYSTEM_INSTRUCTIONS = (
     "1. Get weather. "
     "2. Get activities. "
     "3. Get restaurant recommendations. "
-    "You must obtain the weather data from the WeatherMcp tool before calling the ActivityAgent. "
-    "Never use placeholders like 'today' or 'clear' for the weather parameter; use only the exact output from the weather tool. "
+    "You must attempt to obtain weather data from the WeatherMcp tool before calling the ActivityAgent. "
+    "Use only the exact output from the weather tool for the ActivityAgent weather parameter. "
+    "If the WeatherMcp tool returns a forecast limit error or any other error, do not stop. "
+    "Proceed by calling the ActivityAgent with weather='Unknown' and call the RestaurantAgent normally. "
+    "In your final response, clearly state that weather data was unavailable for the requested date. "
     "4. Output a strictly structured JSON object containing ALL three categories: "
     "weather_data, activity_suggestions, and restaurant_recommendations. "
     "Do not write prose. "
-    "If the user asks for a trip on a specific date other than today, check if the Weather Tool supports it. "
-    "If not, inform the user you can only plan for today. "
-    "If a tool fails, report the error JSON."
+    "If a non-weather tool fails, report the error JSON."
 )
 
 
@@ -59,6 +61,15 @@ def build_kernel(travel_services_plugin: DiscoveryPlugin) -> Kernel:
     kernel.add_plugin(travel_services_plugin, plugin_name="TravelServices")
 
     return kernel
+
+
+def build_system_instructions() -> str:
+    now = datetime.now()
+    return (
+        f"{SYSTEM_INSTRUCTIONS} "
+        f"Today's date is {now.strftime('%Y-%m-%d')}. "
+        f"Current local time is {now.strftime('%H:%M:%S')}."
+    )
 
 
 def present_itinerary(raw_json: str) -> None:
@@ -159,9 +170,10 @@ async def run_console() -> None:
         return
 
     try:
+        runtime_system_instructions = build_system_instructions()
         agent = ChatCompletionAgent(
             name="TripOrchestrator",
-            instructions=SYSTEM_INSTRUCTIONS,
+            instructions=runtime_system_instructions,
             kernel=kernel,
             function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
         )
