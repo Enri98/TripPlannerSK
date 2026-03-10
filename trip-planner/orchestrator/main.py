@@ -28,6 +28,8 @@ SYSTEM_INSTRUCTIONS = (
     "In your final response, clearly state that weather data was unavailable for the requested date. "
     "4. Output a strictly structured JSON object containing ALL three categories: "
     "weather_data, activity_suggestions, and restaurant_recommendations. "
+    "Weather data may be 'Unknown'; still provide activities and restaurants. "
+    "If tools include a note field, preserve it in the final JSON as note. "
     "Do not write prose. "
     "If a non-weather tool fails, report the error JSON."
 )
@@ -94,8 +96,9 @@ def present_itinerary(raw_json: str) -> None:
         return
 
     weather_data = parsed.get("weather_data", parsed.get("weather", "N/A")) if isinstance(parsed, dict) else "N/A"
-    activities = parsed.get("activity_suggestions", []) if isinstance(parsed, dict) else []
-    restaurants = parsed.get("restaurant_recommendations", []) if isinstance(parsed, dict) else []
+    activities_data = parsed.get("activity_suggestions", []) if isinstance(parsed, dict) else []
+    restaurants_data = parsed.get("restaurant_recommendations", []) if isinstance(parsed, dict) else []
+    note = parsed.get("note") if isinstance(parsed, dict) else None
     city = "Unknown"
 
     if isinstance(parsed, dict):
@@ -108,8 +111,21 @@ def present_itinerary(raw_json: str) -> None:
             or "Unknown"
         )
 
+    if isinstance(activities_data, dict):
+        note = activities_data.get("note") or note
+        activities = activities_data.get("activities", [])
+    else:
+        activities = activities_data
+
+    if isinstance(restaurants_data, dict):
+        restaurants = restaurants_data.get("restaurants", [])
+    else:
+        restaurants = restaurants_data
+
     print(f"--- YOUR TRIP TO {city} ---")
     print(f"Current Weather: {weather_data}")
+    if note:
+        print(f"Note: {note}")
     print("Recommended Activities:")
 
     if not isinstance(activities, list) or not activities:

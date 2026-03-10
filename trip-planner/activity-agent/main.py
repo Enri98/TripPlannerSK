@@ -139,6 +139,7 @@ async def suggest_activity(request: TaskRequest):
         execution_settings = AzureChatPromptExecutionSettings(
             tool_choice="auto",
             parallel_tool_calls=False,
+            response_format={"type": "json_object"},
             function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
         )
 
