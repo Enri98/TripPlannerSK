@@ -28,58 +28,81 @@ class AgentCardResolver:
 class DiscoveryPlugin:
     """A2A discovery and caller plugin for Activity and Restaurant agents."""
 
-    def __init__(self, timeout_seconds: float = 20.0) -> None:
+    def __init__(self, timeout_seconds: float = 20.0, client: httpx.AsyncClient | None = None) -> None:
         self._timeout_seconds = timeout_seconds
+        self._client = client or httpx.AsyncClient(timeout=self._timeout_seconds)
+        self._owns_client = client is None
         self._activity_resolver = AgentCardResolver("http://localhost:8081/.well-known/agent-card.json")
         self._restaurant_resolver = AgentCardResolver("http://localhost:8082/.well-known/agent-card.json")
 
+    def _rpc_error(self, code: str, message: str, rpc_id: int | str | None = 1) -> str:
+        return json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "error": {"code": code, "message": message},
+                "id": rpc_id,
+            },
+            ensure_ascii=True,
+        )
+
+    async def close(self) -> None:
+        if self._owns_client and not self._client.is_closed:
+            await self._client.aclose()
+
     async def _post_task(self, resolver: AgentCardResolver, payload: dict, error_prefix: str) -> str:
+        rpc_id = payload.get("id")
         try:
-            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-                endpoint = await resolver.resolve_endpoint(client)
-                response = await client.post(endpoint, json=payload)
-                response.raise_for_status()
-                body = response.json()
+            endpoint = await resolver.resolve_endpoint(self._client)
+            response = await self._client.post(endpoint, json=payload)
+            response.raise_for_status()
+            body = response.json()
         except httpx.ConnectError as exc:
             LOGGER.exception("%s is offline", error_prefix, extra={"error": str(exc)})
-            return json.dumps(
-                {"error": {"code": f"{error_prefix.lower()}_offline", "message": f"{error_prefix} offline: {exc}"}},
-                ensure_ascii=True,
+            return self._rpc_error(
+                code=f"{error_prefix.lower()}_offline",
+                message=f"{error_prefix} offline: {exc}",
+                rpc_id=rpc_id,
+            )
+        except httpx.TimeoutException as exc:
+            LOGGER.exception("%s timed out", error_prefix, extra={"error": str(exc)})
+            return self._rpc_error(
+                code=f"{error_prefix.lower()}_timeout",
+                message=f"{error_prefix} timeout: {exc}",
+                rpc_id=rpc_id,
             )
         except httpx.HTTPStatusError as exc:
             LOGGER.exception("%s returned HTTP error", error_prefix, extra={"status_code": exc.response.status_code})
-            return json.dumps(
-                {
-                    "error": {
-                        "code": f"{error_prefix.lower()}_http_error",
-                        "message": f"{error_prefix} HTTP error {exc.response.status_code}",
-                    }
-                },
-                ensure_ascii=True,
+            return self._rpc_error(
+                code=f"{error_prefix.lower()}_http_error",
+                message=f"{error_prefix} HTTP error {exc.response.status_code}",
+                rpc_id=rpc_id,
             )
         except httpx.RequestError as exc:
             LOGGER.exception("%s request failed", error_prefix, extra={"error": str(exc)})
-            return json.dumps(
-                {"error": {"code": f"{error_prefix.lower()}_request_error", "message": f"Request failed: {exc}"}},
-                ensure_ascii=True,
+            return self._rpc_error(
+                code=f"{error_prefix.lower()}_request_error",
+                message=f"Request failed: {exc}",
+                rpc_id=rpc_id,
             )
         except (ValueError, KeyError) as exc:
             LOGGER.exception("%s discovery/response validation failed", error_prefix, extra={"error": str(exc)})
-            return json.dumps(
-                {"error": {"code": f"{error_prefix.lower()}_invalid_response", "message": str(exc)}},
-                ensure_ascii=True,
+            return self._rpc_error(
+                code=f"{error_prefix.lower()}_invalid_response",
+                message=str(exc),
+                rpc_id=rpc_id,
             )
 
         if "error" in body:
             LOGGER.error("%s returned RPC error", error_prefix, extra={"error": body.get("error")})
-            return json.dumps({"error": body["error"]}, ensure_ascii=True)
+            return json.dumps({"jsonrpc": "2.0", "error": body["error"], "id": rpc_id}, ensure_ascii=True)
 
         result = body.get("result")
         if result is None:
             LOGGER.error("%s response missing result", error_prefix, extra={"body": body})
-            return json.dumps(
-                {"error": {"code": f"{error_prefix.lower()}_missing_result", "message": "Missing result in response."}},
-                ensure_ascii=True,
+            return self._rpc_error(
+                code=f"{error_prefix.lower()}_missing_result",
+                message="Missing result in response.",
+                rpc_id=rpc_id,
             )
 
         return json.dumps(result, ensure_ascii=True)

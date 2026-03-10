@@ -45,7 +45,7 @@ def load_environment() -> None:
     LOGGER.info("Loaded environment", extra={"env_path": str(env_path)})
 
 
-def build_kernel() -> Kernel:
+def build_kernel(travel_services_plugin: DiscoveryPlugin) -> Kernel:
     kernel = Kernel()
 
     chat_service = AzureChatCompletion(
@@ -56,7 +56,7 @@ def build_kernel() -> Kernel:
     )
     kernel.add_service(chat_service)
 
-    kernel.add_plugin(DiscoveryPlugin(), plugin_name="TravelServices")
+    kernel.add_plugin(travel_services_plugin, plugin_name="TravelServices")
 
     return kernel
 
@@ -133,7 +133,8 @@ async def run_console() -> None:
     configure_logging()
     load_environment()
 
-    kernel = build_kernel()
+    travel_services_plugin = DiscoveryPlugin()
+    kernel = build_kernel(travel_services_plugin)
 
     weather_server_script = Path(__file__).resolve().parents[2] / "mcp-weather-server" / "server.py"
     python_executable = str((Path(__file__).resolve().parents[1] / ".venv" / "Scripts" / "python.exe").resolve())
@@ -192,6 +193,10 @@ async def run_console() -> None:
             await mcp_plugin.close()
         except Exception:
             LOGGER.warning("MCP weather plugin closed with errors.")
+        try:
+            await travel_services_plugin.close()
+        except Exception:
+            LOGGER.warning("Travel services plugin closed with errors.")
 
 
 if __name__ == "__main__":
