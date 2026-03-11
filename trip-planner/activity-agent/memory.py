@@ -1,32 +1,32 @@
 ACTIVITIES_DB = {
-    "Rome": [
-        {"name": "Colosseum", "type": "Outdoor", "description": "Visit the ancient Roman amphitheater."},
-        {"name": "Vatican Museums", "type": "Indoor", "description": "Explore the vast collection of art and history."},
-        {"name": "Trevi Fountain", "type": "Outdoor", "description": "Throw a coin in the famous Baroque fountain."},
-        {"name": "Borghese Gallery and Museum", "type": "Indoor", "description": "Admire masterpieces of art in a beautiful villa."}
+    "Roma": [
+        {"name": "Colosseo", "type": "All'aperto", "description": "Visita l'antico anfiteatro romano."},
+        {"name": "Musei Vaticani", "type": "Al chiuso", "description": "Esplora la vasta collezione di arte e storia."},
+        {"name": "Fontana di Trevi", "type": "All'aperto", "description": "Lancia una moneta nella celebre fontana barocca."},
+        {"name": "Galleria e Museo Borghese", "type": "Al chiuso", "description": "Ammira capolavori d'arte in una splendida villa."}
     ],
-    "Milan": [
-        {"name": "Milan Cathedral (Duomo)", "type": "Outdoor", "description": "Visit the magnificent Gothic cathedral."},
-        {"name": "Leonardo da Vinci's Last Supper", "type": "Indoor", "description": "See the iconic mural at Santa Maria delle Grazie."},
-        {"name": "Sforza Castle", "type": "Outdoor", "description": "Explore the historical castle and its museums."},
-        {"name": "Pinacoteca di Brera", "type": "Indoor", "description": "Discover a major art gallery in Milan."}
+    "Milano": [
+        {"name": "Cattedrale di Milano (Duomo)", "type": "All'aperto", "description": "Visita la magnifica cattedrale gotica."},
+        {"name": "L'Ultima Cena di Leonardo da Vinci", "type": "Al chiuso", "description": "Osserva l'iconico affresco a Santa Maria delle Grazie."},
+        {"name": "Castello Sforzesco", "type": "All'aperto", "description": "Esplora il castello storico e i suoi musei."},
+        {"name": "Pinacoteca di Brera", "type": "Al chiuso", "description": "Scopri una delle principali gallerie d'arte di Milano."}
     ],
-    "Venice": [
-        {"name": "St. Mark's Square (Piazza San Marco)", "type": "Outdoor", "description": "The principal public square of Venice."},
-        {"name": "Doge's Palace (Palazzo Ducale)", "type": "Indoor", "description": "A masterpiece of Gothic architecture."},
-        {"name": "Rialto Bridge (Ponte di Rialto)", "type": "Outdoor", "description": "The oldest bridge across the Grand Canal."},
-        {"name": "Gallerie dell'Accademia", "type": "Indoor", "description": "A museum gallery of pre-19th-century art in Venice."}
+    "Venezia": [
+        {"name": "Piazza San Marco", "type": "All'aperto", "description": "La principale piazza pubblica di Venezia."},
+        {"name": "Palazzo Ducale", "type": "Al chiuso", "description": "Un capolavoro dell'architettura gotica."},
+        {"name": "Ponte di Rialto", "type": "All'aperto", "description": "Il ponte piu antico sul Canal Grande."},
+        {"name": "Gallerie dell'Accademia", "type": "Al chiuso", "description": "Una galleria museale con arte veneziana precedente al XIX secolo."}
     ],
-    "Florence": [
-        {"name": "Florence Cathedral (Duomo)", "type": "Outdoor", "description": "The iconic cathedral with its magnificent dome."},
-        {"name": "Uffizi Gallery", "type": "Indoor", "description": "One of the most important Italian museums."},
-        {"name": "Ponte Vecchio", "type": "Outdoor", "description": "A medieval stone bridge with shops built along it."},
-        {"name": "Palazzo Pitti", "type": "Indoor", "description": "A vast, mainly Renaissance, palace in Florence."}
+    "Firenze": [
+        {"name": "Cattedrale di Firenze (Duomo)", "type": "All'aperto", "description": "L'iconica cattedrale con la sua magnifica cupola."},
+        {"name": "Galleria degli Uffizi", "type": "Al chiuso", "description": "Uno dei musei italiani piu importanti."},
+        {"name": "Ponte Vecchio", "type": "All'aperto", "description": "Un ponte medievale in pietra con botteghe lungo il passaggio."},
+        {"name": "Palazzo Pitti", "type": "Al chiuso", "description": "Un vasto palazzo fiorentino, prevalentemente rinascimentale."}
     ],
-    "Naples": [
-        {"name": "Mount Vesuvius", "type": "Outdoor", "description": "Hike the volcano that destroyed Pompeii."},
-        {"name": "Naples National Archaeological Museum", "type": "Indoor", "description": "Home to an extensive collection of Greco-Roman artifacts."},
-        {"name": "Pompeii", "type": "Outdoor", "description": "Explore the ancient Roman city buried by Vesuvius."},
-        {"name": "Cappella Sansevero", "type": "Indoor", "description": "A chapel with a collection of unique art pieces."}
+    "Napoli": [
+        {"name": "Vesuvio", "type": "All'aperto", "description": "Percorri il vulcano che distrusse Pompei."},
+        {"name": "Museo Archeologico Nazionale di Napoli", "type": "Al chiuso", "description": "Custodisce un'ampia collezione di reperti greco-romani."},
+        {"name": "Pompei", "type": "All'aperto", "description": "Esplora l'antica citta romana sepolta dal Vesuvio."},
+        {"name": "Cappella Sansevero", "type": "Al chiuso", "description": "Una cappella con una raccolta di opere d'arte uniche."}
     ]
 }

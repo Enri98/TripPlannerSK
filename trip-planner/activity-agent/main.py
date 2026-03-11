@@ -65,7 +65,7 @@ class ActivitySearchPlugin:
                 return key
         return None
 
-    @kernel_function(description="Returns activities filtered by city and weather.")
+    @kernel_function(description="Restituisce attivita filtrate per citta e meteo.")
     async def get_activities(self, city: str, weather: str) -> list[dict]:
         city_key = self._resolve_city_key(city)
         if not city_key:
@@ -73,19 +73,19 @@ class ActivitySearchPlugin:
 
         normalized_weather = self._normalize(weather)
         activities = ACTIVITIES_DB.get(city_key, [])
-        neutral_weather_values = {"unknown", "n/a", "na", "none"}
+        neutral_weather_values = {"unknown", "sconosciuto", "n/a", "na", "none"}
 
-        bad_weather_markers = {"rain", "storm", "snow", "thunder", "wind"}
-        good_weather_markers = {"sun", "clear", "warm", "hot"}
+        bad_weather_markers = {"pioggia", "temporale", "neve", "tuono", "vento", "grandine"}
+        good_weather_markers = {"sole", "sereno", "caldo"}
 
         if normalized_weather in neutral_weather_values:
             return activities
 
         if any(marker in normalized_weather for marker in bad_weather_markers):
-            return [item for item in activities if item.get("type", "").lower() == "indoor"]
+            return [item for item in activities if item.get("type", "").lower() == "al chiuso"]
 
         if any(marker in normalized_weather for marker in good_weather_markers):
-            return [item for item in activities if item.get("type", "").lower() == "outdoor"]
+            return [item for item in activities if item.get("type", "").lower() == "all'aperto"]
 
         return activities
 
@@ -111,7 +111,7 @@ async def get_agent_card():
     """
     if AGENT_CARD_CONTENT:
         return Response(content=json.dumps(AGENT_CARD_CONTENT, indent=4), media_type="application/json")
-    return Response(status_code=404, content="Agent card not found.")
+    return Response(status_code=404, content="Scheda agente non trovata.")
 
 @app.post("/task")
 async def suggest_activity(request: TaskRequest):
@@ -139,7 +139,7 @@ async def suggest_activity(request: TaskRequest):
     if ActivitySearchPlugin._resolve_city_key(city) is None:
         return {
             "jsonrpc": "2.0",
-            "error": {"code": -32602, "message": "City not supported"},
+            "error": {"code": -32602, "message": "Citta non supportata"},
             "id": request.id
         }
 
@@ -173,7 +173,7 @@ async def suggest_activity(request: TaskRequest):
 
         return {
             "jsonrpc": "2.0",
-            "error": {"code": -32603, "message": f"Agent failed: {str(e)}"},
+            "error": {"code": -32603, "message": f"Agente non disponibile: {str(e)}"},
             "id": request.id
         }
 
@@ -196,7 +196,7 @@ async def suggest_activity(request: TaskRequest):
             "jsonrpc": "2.0",
             "error": {
                 "code": -32603,
-                "message": "Internal error: Failed to decode JSON from AI response."
+                "message": "Errore interno: impossibile decodificare il JSON dalla risposta AI."
             },
             "id": request.id
         }
@@ -206,7 +206,7 @@ async def suggest_activity(request: TaskRequest):
             "jsonrpc": "2.0",
             "error": {
                 "code": -32603,
-                "message": "Internal error: Invalid response schema from AI output."
+                "message": "Errore interno: schema di risposta non valido nell'output AI."
             },
             "id": request.id
         }

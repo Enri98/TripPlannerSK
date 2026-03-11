@@ -67,7 +67,7 @@ class RestaurantSearchPlugin:
                 return key
         return None
 
-    @kernel_function(description="Returns restaurants filtered by city and cuisine.")
+    @kernel_function(description="Restituisce ristoranti filtrati per citta e tipo di cucina.")
     async def get_restaurants(self, city: str, cuisine: str) -> list[dict]:
         city_key = self._resolve_city_key(city)
         if not city_key:
@@ -101,7 +101,7 @@ async def startup_event() -> None:
 async def get_agent_card() -> Response:
     if AGENT_CARD_CONTENT:
         return Response(content=json.dumps(AGENT_CARD_CONTENT, indent=4), media_type="application/json")
-    return Response(status_code=404, content="Agent card not found.")
+    return Response(status_code=404, content="Scheda agente non trovata.")
 
 
 @app.post("/task")
@@ -112,7 +112,7 @@ async def suggest_restaurant(request: TaskRequest):
     if RestaurantSearchPlugin._resolve_city_key(city) is None:
         return {
             "jsonrpc": "2.0",
-            "error": {"code": -32602, "message": "City not supported"},
+            "error": {"code": -32602, "message": "Citta non supportata"},
             "id": request.id,
         }
 
@@ -153,7 +153,7 @@ async def suggest_restaurant(request: TaskRequest):
 
         return {
             "jsonrpc": "2.0",
-            "error": {"code": -32603, "message": f"Agent failed: {str(e)}"},
+            "error": {"code": -32603, "message": f"Agente non disponibile: {str(e)}"},
             "id": request.id,
         }
 
@@ -173,7 +173,7 @@ async def suggest_restaurant(request: TaskRequest):
             "jsonrpc": "2.0",
             "error": {
                 "code": -32603,
-                "message": "Internal error: Failed to decode JSON from AI response.",
+                "message": "Errore interno: impossibile decodificare il JSON dalla risposta AI.",
             },
             "id": request.id,
         }
@@ -183,7 +183,7 @@ async def suggest_restaurant(request: TaskRequest):
             "jsonrpc": "2.0",
             "error": {
                 "code": -32603,
-                "message": "Internal error: Invalid response schema from AI output.",
+                "message": "Errore interno: schema di risposta non valido nell'output AI.",
             },
             "id": request.id,
         }

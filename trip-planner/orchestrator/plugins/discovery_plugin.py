@@ -60,28 +60,28 @@ class DiscoveryPlugin:
             LOGGER.exception("%s is offline", error_prefix, extra={"error": str(exc)})
             return self._rpc_error(
                 code=f"{error_prefix.lower()}_offline",
-                message=f"{error_prefix} offline: {exc}",
+                message=f"{error_prefix} non raggiungibile: {exc}",
                 rpc_id=rpc_id,
             )
         except httpx.TimeoutException as exc:
             LOGGER.exception("%s timed out", error_prefix, extra={"error": str(exc)})
             return self._rpc_error(
                 code=f"{error_prefix.lower()}_timeout",
-                message=f"{error_prefix} timeout: {exc}",
+                message=f"Timeout su {error_prefix}: {exc}",
                 rpc_id=rpc_id,
             )
         except httpx.HTTPStatusError as exc:
             LOGGER.exception("%s returned HTTP error", error_prefix, extra={"status_code": exc.response.status_code})
             return self._rpc_error(
                 code=f"{error_prefix.lower()}_http_error",
-                message=f"{error_prefix} HTTP error {exc.response.status_code}",
+                message=f"Errore HTTP {exc.response.status_code} su {error_prefix}",
                 rpc_id=rpc_id,
             )
         except httpx.RequestError as exc:
             LOGGER.exception("%s request failed", error_prefix, extra={"error": str(exc)})
             return self._rpc_error(
                 code=f"{error_prefix.lower()}_request_error",
-                message=f"Request failed: {exc}",
+                message=f"Richiesta non riuscita: {exc}",
                 rpc_id=rpc_id,
             )
         except (ValueError, KeyError) as exc:
@@ -101,13 +101,13 @@ class DiscoveryPlugin:
             LOGGER.error("%s response missing result", error_prefix, extra={"body": body})
             return self._rpc_error(
                 code=f"{error_prefix.lower()}_missing_result",
-                message="Missing result in response.",
+                message="Risultato mancante nella risposta.",
                 rpc_id=rpc_id,
             )
 
         return json.dumps(result, ensure_ascii=True)
 
-    @kernel_function(description="Calls the ActivityAgent with city and weather context.")
+    @kernel_function(description="Chiama ActivityAgent con contesto di citta e meteo.")
     async def call_activity_agent(self, city: str, weather: str) -> str:
         payload = {
             "jsonrpc": "2.0",
@@ -120,7 +120,7 @@ class DiscoveryPlugin:
         }
         return await self._post_task(self._activity_resolver, payload, "activity_agent")
 
-    @kernel_function(description="Calls the RestaurantAgent with city and cuisine preference.")
+    @kernel_function(description="Chiama RestaurantAgent con citta e preferenza di cucina.")
     async def call_restaurant_agent(self, city: str, cuisine_preference: str) -> str:
         payload = {
             "jsonrpc": "2.0",

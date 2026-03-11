@@ -10,25 +10,25 @@ mcp = FastMCP("WeatherMcp")
 
 @mcp.tool()
 async def get_available_cities() -> list[str]:
-    """Returns a list of available cities."""
+    """Restituisce la lista delle citta disponibili."""
     return list(CITIES_DB.keys())
 
 
 @mcp.tool()
 async def get_weather(city: str, date: str = "today") -> str:
     """
-    Get weather for a given city.
-    Supports forecast requests for today and future dates up to 14 days ahead.
+    Recupera il meteo per una citta.
+    Supporta richieste per oggi e per date future fino a 14 giorni.
 
     Args:
-        city: The name of the city.
-        date: Requested date in YYYY-MM-DD format or "today". Defaults to "today".
+        city: Nome della citta.
+        date: Data richiesta in formato YYYY-MM-DD oppure "today". Default: "today".
 
     Returns:
-        A string describing weather conditions.
+        Una stringa descrittiva delle condizioni meteo in italiano.
     """
     if city not in CITIES_DB:
-        return f"City '{city}' not found. Available cities: {', '.join(CITIES_DB.keys())}"
+        return f"Citta '{city}' non trovata. Citta disponibili: {', '.join(CITIES_DB.keys())}"
 
     today = dt_date.today()
     requested_date = today
@@ -36,9 +36,9 @@ async def get_weather(city: str, date: str = "today") -> str:
         try:
             requested_date = dt_date.fromisoformat(date)
         except ValueError:
-            return "Error: Invalid date format. Use YYYY-MM-DD or 'today'."
+            return "Errore: formato data non valido. Usa YYYY-MM-DD oppure 'today'."
     if requested_date > today + timedelta(days=14):
-        return '{"error": "forecast_limit", "message": "Weather data is only available for the next 14 days."}'
+        return '{"error": "forecast_limit", "message": "I dati meteo sono disponibili solo per i prossimi 14 giorni."}'
 
     city_data = CITIES_DB[city]
     lat = city_data["lat"]
@@ -66,21 +66,21 @@ async def get_weather(city: str, date: str = "today") -> str:
             weather_codes = daily.get("weather_code", [])
 
             if not temperatures or not weather_codes:
-                return "Could not retrieve complete weather information."
+                return "Impossibile recuperare informazioni meteo complete."
 
             temperature = temperatures[0]
             weather_code = weather_codes[0]
-            weather_description = WMO_CODES.get(weather_code, "Unknown weather condition")
+            weather_description = WMO_CODES.get(weather_code, "condizioni meteo sconosciute")
 
             return (
-                f"The forecast for {city} on {requested_date_str} is a high of "
-                f"{temperature} C with {weather_description.lower()}."
+                f"Le previsioni per {city} del {requested_date_str} indicano una massima di "
+                f"{temperature} C con {weather_description.lower()}."
             )
 
         except httpx.HTTPStatusError as exc:
-            return f"Error fetching weather data: {exc.response.status_code}"
+            return f"Errore nel recupero dati meteo: {exc.response.status_code}"
         except httpx.RequestError as exc:
-            return f"Error connecting to the weather service: {exc}"
+            return f"Errore di connessione al servizio meteo: {exc}"
 
 
 if __name__ == "__main__":

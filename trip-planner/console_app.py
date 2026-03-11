@@ -80,9 +80,9 @@ async def initialize_runtime(console: Console) -> tuple[
         python_executable = Path(__file__).resolve().parent / ".venv" / "Scripts" / "python.exe"
 
         if not python_executable.exists():
-            raise FileNotFoundError(f"Virtual environment interpreter not found at: {python_executable}")
+            raise FileNotFoundError(f"Interprete del virtual environment non trovato in: {python_executable}")
         if not weather_server_script.exists():
-            raise FileNotFoundError(f"Weather MCP server not found at: {weather_server_script}")
+            raise FileNotFoundError(f"Server meteo MCP non trovato in: {weather_server_script}")
 
         mcp_plugin = MCPStdioPlugin(
             name="WeatherMcp",
@@ -101,7 +101,7 @@ async def initialize_runtime(console: Console) -> tuple[
             kernel=kernel,
             function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
         )
-        console.print("[bold green]Trip Planner ready.[/bold green] Type 'exit' to quit.")
+        console.print("[bold green]Trip Planner pronto.[/bold green] Scrivi 'exit' per uscire.")
 
         return agent, discovery_plugin, mcp_plugin, shared_client
     except Exception:
@@ -143,8 +143,8 @@ async def present_itinerary(console: Console, raw_json: str) -> None:
         except json.JSONDecodeError:
             console.print(
                 Panel(
-                    "Trip Director returned non-JSON output.",
-                    title="Parsing Error",
+                    "Il Direttore Viaggio ha restituito un output non JSON.",
+                    title="Errore di parsing",
                     border_style="red",
                 )
             )
@@ -155,7 +155,7 @@ async def present_itinerary(console: Console, raw_json: str) -> None:
             console.print(
                 Panel(
                     json.dumps(parsed["error"], indent=2, ensure_ascii=True),
-                    title="Trip Planning Error",
+                    title="Errore pianificazione viaggio",
                     border_style="red",
                 )
             )
@@ -164,7 +164,7 @@ async def present_itinerary(console: Console, raw_json: str) -> None:
         console.print(
             Panel(
                 str(exc),
-                title="Schema Validation Error",
+                title="Errore validazione schema",
                 border_style="red",
             )
         )
@@ -173,11 +173,11 @@ async def present_itinerary(console: Console, raw_json: str) -> None:
 
     weather = itinerary.weather_data
     weather_text = weather if isinstance(weather, str) else json.dumps(weather, indent=2, ensure_ascii=True)
-    console.print(Panel(weather_text, title="Weather", border_style="cyan"))
+    console.print(Panel(weather_text, title="Meteo", border_style="cyan"))
 
     note = itinerary.activity_suggestions.note or itinerary.restaurant_recommendations.note or itinerary.note
     if note:
-        console.print(Panel(note, title="Note", border_style="yellow"))
+        console.print(Panel(note, title="Nota", border_style="yellow"))
 
     if itinerary.activity_suggestions.error:
         error_obj = itinerary.activity_suggestions.error
@@ -186,18 +186,18 @@ async def present_itinerary(console: Console, raw_json: str) -> None:
             if isinstance(error_obj, RpcError)
             else json.dumps(error_obj, indent=2, ensure_ascii=True)
         )
-        console.print(Panel(error_text, title="Service Unavailable: Activities", border_style="red"))
+        console.print(Panel(error_text, title="Servizio non disponibile: attivita", border_style="red"))
     else:
-        activities_table = Table(title="Activities")
-        activities_table.add_column("Name", style="bold")
-        activities_table.add_column("Type")
-        activities_table.add_column("Description")
+        activities_table = Table(title="Attivita consigliate")
+        activities_table.add_column("Nome", style="bold")
+        activities_table.add_column("Tipo")
+        activities_table.add_column("Descrizione")
 
         if itinerary.activity_suggestions.activities:
             for activity in itinerary.activity_suggestions.activities:
                 activities_table.add_row(activity.name, activity.type, activity.description)
         else:
-            activities_table.add_row("-", "-", "No activities available.")
+            activities_table.add_row("-", "-", "Nessuna attivita disponibile.")
         console.print(activities_table)
 
     if itinerary.restaurant_recommendations.error:
@@ -207,23 +207,23 @@ async def present_itinerary(console: Console, raw_json: str) -> None:
             if isinstance(error_obj, RpcError)
             else json.dumps(error_obj, indent=2, ensure_ascii=True)
         )
-        console.print(Panel(error_text, title="Service Unavailable: Restaurants", border_style="red"))
+        console.print(Panel(error_text, title="Servizio non disponibile: ristoranti", border_style="red"))
     else:
-        restaurants_table = Table(title="Restaurants")
-        restaurants_table.add_column("Name", style="bold")
-        restaurants_table.add_column("Cuisine")
-        restaurants_table.add_column("Price Range")
+        restaurants_table = Table(title="Ristoranti consigliati")
+        restaurants_table.add_column("Nome", style="bold")
+        restaurants_table.add_column("Cucina")
+        restaurants_table.add_column("Fascia di prezzo")
 
         if itinerary.restaurant_recommendations.restaurants:
             for restaurant in itinerary.restaurant_recommendations.restaurants:
                 restaurants_table.add_row(restaurant.name, restaurant.type, restaurant.price_range)
         else:
-            restaurants_table.add_row("-", "-", "No restaurants available.")
+            restaurants_table.add_row("-", "-", "Nessun ristorante disponibile.")
         console.print(restaurants_table)
 
 
 async def read_destination() -> str:
-    return await asyncio.to_thread(Prompt.ask, "[bold blue]Where would you like to go?")
+    return await asyncio.to_thread(Prompt.ask, "[bold blue]Dove vorresti andare?")
 
 
 async def run_console_app() -> None:
@@ -243,21 +243,21 @@ async def run_console_app() -> None:
             if not destination:
                 continue
 
-            user_message = f"Plan a trip to {destination}."
+            user_message = f"Pianifica un viaggio a {destination}."
             execution_settings = AzureChatPromptExecutionSettings(
                 tool_choice="auto",
                 parallel_tool_calls=False,
                 response_format={"type": "json_object"},
             )
 
-            with console.status("[bold green]Planning your trip..."):
+            with console.status("[bold green]Sto pianificando il tuo viaggio..."):
                 response = await agent.get_response(
                     messages=user_message,
                     arguments=KernelArguments(settings=execution_settings),
                 )
             await present_itinerary(console, str(response.message.content))
     except Exception as exc:
-        console.print(Panel(str(exc), title="Startup/Runtime Error", border_style="red"))
+        console.print(Panel(str(exc), title="Errore avvio/esecuzione", border_style="red"))
     finally:
         if discovery_plugin and mcp_plugin and shared_client:
             await shutdown_runtime(discovery_plugin, mcp_plugin, shared_client)

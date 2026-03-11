@@ -20,26 +20,27 @@ except ImportError:
 
 LOGGER = logging.getLogger("trip_orchestrator")
 SYSTEM_INSTRUCTIONS = (
-    "You are the Trip Director. "
-    "1. Get weather. "
-    "2. Get activities. "
-    "3. Get restaurant recommendations. "
-    "You must attempt to obtain weather data from the WeatherMcp tool before calling the ActivityAgent. "
-    "Use only the exact output from the weather tool for the ActivityAgent weather parameter. "
-    "If the WeatherMcp tool returns a forecast limit error or any other error, do not stop. "
-    "Proceed by calling the ActivityAgent with weather='Unknown' in a valid JSON-RPC request and call the RestaurantAgent normally. "
-    "In your final response, clearly state that weather data was unavailable for the requested date. "
-    "4. Output a strictly structured JSON object containing ALL three categories: "
-    "weather_data, activity_suggestions, and restaurant_recommendations. "
-    "Set activity_suggestions to the exact ActivityAgent result object and preserve its keys exactly "
-    "(activities and optional note). "
-    "Set restaurant_recommendations to the exact RestaurantAgent result object and preserve its keys exactly "
-    "(restaurants and optional note). "
-    "If an agent/tool returns an error object, preserve and pass through that error block under the same section "
-    "instead of transforming it. "
-    "Weather data may be 'Unknown'; still provide activities and restaurants. "
-    "Do not write prose. "
-    "If a non-weather tool fails, report the error JSON."
+    "Sei il Direttore del Viaggio. "
+    "Devi rispondere sempre in italiano. "
+    "1. Ottieni il meteo. "
+    "2. Ottieni attivita. "
+    "3. Ottieni suggerimenti ristorante. "
+    "Devi tentare di ottenere i dati meteo dal tool WeatherMcp prima di chiamare ActivityAgent. "
+    "Per il parametro weather di ActivityAgent usa solo e soltanto l'output esatto del tool meteo, con le descrizioni meteo in italiano fornite dal tool stesso. "
+    "Se WeatherMcp restituisce un errore di limite previsione o qualsiasi altro errore, non fermarti. "
+    "Prosegui chiamando ActivityAgent con weather='Sconosciuto' in una richiesta JSON-RPC valida e chiama normalmente RestaurantAgent. "
+    "Nella risposta finale indica chiaramente che i dati meteo non erano disponibili per la data richiesta. "
+    "4. Restituisci un oggetto JSON rigorosamente strutturato contenente TUTTE e tre le categorie: "
+    "weather_data, activity_suggestions e restaurant_recommendations. "
+    "Imposta activity_suggestions con l'oggetto risultato esatto di ActivityAgent e preserva esattamente le sue chiavi "
+    "(activities e note opzionale). "
+    "Imposta restaurant_recommendations con l'oggetto risultato esatto di RestaurantAgent e preserva esattamente le sue chiavi "
+    "(restaurants e note opzionale). "
+    "Se un agente/tool restituisce un oggetto error, preserva e inoltra quel blocco error nella stessa sezione "
+    "senza trasformarlo. "
+    "I dati meteo possono essere 'Sconosciuto'; fornisci comunque attivita e ristoranti. "
+    "Non scrivere prosa. "
+    "Se un tool non meteo fallisce, riporta l'errore JSON."
 )
 
 
@@ -77,8 +78,8 @@ def build_system_instructions() -> str:
     now = datetime.now()
     return (
         f"{SYSTEM_INSTRUCTIONS} "
-        f"Today's date is {now.strftime('%Y-%m-%d')}. "
-        f"Current local time is {now.strftime('%H:%M:%S')}."
+        f"La data di oggi e {now.strftime('%Y-%m-%d')}. "
+        f"L'ora locale corrente e {now.strftime('%H:%M:%S')}."
     )
 
 
@@ -91,7 +92,7 @@ def present_itinerary(raw_json: str) -> None:
         return
 
     if isinstance(parsed, dict) and "error" in parsed:
-        print("----- TRIP PLANNING ERROR -----")
+        print("----- ERRORE PIANIFICAZIONE VIAGGIO -----")
         print(json.dumps(parsed, indent=2, ensure_ascii=True))
         return
 
@@ -99,7 +100,7 @@ def present_itinerary(raw_json: str) -> None:
     activities_data = parsed.get("activity_suggestions", []) if isinstance(parsed, dict) else []
     restaurants_data = parsed.get("restaurant_recommendations", []) if isinstance(parsed, dict) else []
     note = parsed.get("note") if isinstance(parsed, dict) else None
-    city = "Unknown"
+    city = "Sconosciuta"
 
     if isinstance(parsed, dict):
         city = (
@@ -108,7 +109,7 @@ def present_itinerary(raw_json: str) -> None:
             or parsed.get("trip_city")
             or parsed.get("location")
             or parsed.get("city_name")
-            or "Unknown"
+            or "Sconosciuta"
         )
 
     if isinstance(activities_data, dict):
@@ -122,36 +123,36 @@ def present_itinerary(raw_json: str) -> None:
     else:
         restaurants = restaurants_data
 
-    print(f"--- YOUR TRIP TO {city} ---")
-    print(f"Current Weather: {weather_data}")
+    print(f"--- IL TUO VIAGGIO A {city} ---")
+    print(f"Meteo attuale: {weather_data}")
     if note:
-        print(f"Note: {note}")
-    print("Recommended Activities:")
+        print(f"Nota: {note}")
+    print("Attivita consigliate:")
 
     if not isinstance(activities, list) or not activities:
-        print("- No activities available.")
+        print("- Nessuna attivita disponibile.")
         return
 
     for item in activities:
         if isinstance(item, dict):
-            name = item.get("name", "Unnamed activity")
-            kind = item.get("type", "Unknown")
-            description = item.get("description", "No description")
+            name = item.get("name", "Attivita senza nome")
+            kind = item.get("type", "Sconosciuto")
+            description = item.get("description", "Nessuna descrizione")
             print(f"- {name} [{kind}] - {description}")
         else:
             print(f"- {item}")
 
-    print("Recommended Restaurants:")
+    print("Ristoranti consigliati:")
     if not isinstance(restaurants, list) or not restaurants:
-        print("- No restaurant recommendations available.")
+        print("- Nessun suggerimento ristorante disponibile.")
         return
 
     for item in restaurants:
         if isinstance(item, dict):
-            name = item.get("name", "Unnamed restaurant")
-            kind = item.get("type", "Unknown")
+            name = item.get("name", "Ristorante senza nome")
+            kind = item.get("type", "Sconosciuto")
             price_range = item.get("price_range", "N/A")
-            print(f"- {name} [{kind}] - Price: {price_range}")
+            print(f"- {name} [{kind}] - Prezzo: {price_range}")
         else:
             print(f"- {item}")
 
@@ -180,8 +181,8 @@ async def run_console() -> None:
     except Exception:
         LOGGER.exception("Failed to initialize MCP weather plugin")
         print(
-            "Unable to start the weather tool (MCP subprocess failed). "
-            "Check mcp-weather-server and try again."
+            "Impossibile avviare lo strumento meteo (sottoprocesso MCP non riuscito). "
+            "Controlla mcp-weather-server e riprova."
         )
         return
 
@@ -194,11 +195,11 @@ async def run_console() -> None:
             function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
         )
 
-        print("Trip Orchestrator ready. Type your request (or 'exit').")
+        print("Trip Orchestrator pronto. Inserisci la tua richiesta (oppure 'exit').")
         while True:
-            user_input = input("\nYou> ").strip()
+            user_input = input("\nTu> ").strip()
             if user_input.lower() in {"exit", "quit"}:
-                print("Goodbye.")
+                print("Arrivederci.")
                 return
             if not user_input:
                 continue
