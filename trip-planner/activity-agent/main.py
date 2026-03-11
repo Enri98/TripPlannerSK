@@ -1,7 +1,8 @@
 import json
 import os
+from copy import deepcopy
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from anyio import Path as AnyioPath
 from fastapi import FastAPI, Response
@@ -43,6 +44,97 @@ class ActivityResponse(BaseModel):
 
     activities: list[ActivityItem]
     note: str | None = None
+
+
+def _normalize_schema_for_structured_outputs(schema: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(schema)
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            properties = node.get("properties")
+            if isinstance(properties, dict):
+                # Azure/OpenAI strict schema expects every property listed as required.
+                node["required"] = list(properties.keys())
+                node.setdefault("additionalProperties", False)
+
+            for key in ("$defs", "definitions", "properties", "patternProperties", "dependentSchemas"):
+                child_map = node.get(key)
+                if isinstance(child_map, dict):
+                    for child in child_map.values():
+                        walk(child)
+
+            for key in ("items", "contains", "if", "then", "else", "not", "propertyNames"):
+                child = node.get(key)
+                if isinstance(child, dict):
+                    walk(child)
+
+            for key in ("allOf", "anyOf", "oneOf", "prefixItems"):
+                child_list = node.get(key)
+                if isinstance(child_list, list):
+                    for child in child_list:
+                        walk(child)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(normalized)
+    return normalized
+
+
+def build_response_format_from_model(model: type[BaseModel], schema_name: str) -> dict[str, Any]:
+    normalized_schema = _normalize_schema_for_structured_outputs(model.model_json_schema())
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": schema_name,
+            "strict": True,
+            "schema": normalized_schema,
+        },
+    }
+
+
+def is_schema_response_format_unsupported(exc: Exception) -> bool:
+    def collect_messages(error: BaseException, seen: set[int]) -> list[str]:
+        if id(error) in seen:
+            return []
+        seen.add(id(error))
+
+        messages = [str(error), repr(error)]
+        inner = getattr(error, "inner_exception", None)
+        if isinstance(inner, BaseException):
+            messages.extend(collect_messages(inner, seen))
+        cause = getattr(error, "__cause__", None)
+        if isinstance(cause, BaseException):
+            messages.extend(collect_messages(cause, seen))
+        context = getattr(error, "__context__", None)
+        if isinstance(context, BaseException):
+            messages.extend(collect_messages(context, seen))
+        return messages
+
+    error_text = " ".join(collect_messages(exc, set())).lower()
+    markers = (
+        "response_format",
+        "json_schema",
+        "schema",
+        "unsupported",
+        "not supported",
+        "invalid",
+        "bad request",
+        "required",
+    )
+    return any(marker in error_text for marker in markers)
+
+
+def rpc_error_response(
+    rpc_id: int | None,
+    code: int,
+    message: str,
+    data: dict[str, Any] | list[Any] | str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"code": code, "message": message}
+    if data is not None:
+        payload["data"] = data
+    return {"jsonrpc": "2.0", "error": payload, "id": rpc_id}
 
 # --- File Paths ---
 BASE_DIR = Path(__file__).parent
@@ -137,11 +229,7 @@ async def suggest_activity(request: TaskRequest):
 
     # --- Error Handling for Unsupported City ---
     if ActivitySearchPlugin._resolve_city_key(city) is None:
-        return {
-            "jsonrpc": "2.0",
-            "error": {"code": -32602, "message": "Citta non supportata"},
-            "id": request.id
-        }
+        return rpc_error_response(request.id, -32602, "Citta non supportata")
 
     # 3. Register Function from prompt
     chat_function = kernel.add_function(
@@ -154,15 +242,30 @@ async def suggest_activity(request: TaskRequest):
         execution_settings = AzureChatPromptExecutionSettings(
             tool_choice="auto",
             parallel_tool_calls=False,
-            response_format={"type": "json_object"},
+            response_format=build_response_format_from_model(ActivityResponse, "activity_response"),
             function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
         )
 
-        # Invoke with variable binding
-        result = await kernel.invoke(
-            chat_function,
-            KernelArguments(settings=execution_settings, city=city, weather=weather),
-        )
+        try:
+            result = await kernel.invoke(
+                chat_function,
+                KernelArguments(settings=execution_settings, city=city, weather=weather),
+            )
+        except Exception as schema_exc:
+            if not is_schema_response_format_unsupported(schema_exc):
+                raise
+
+            print(f"WARNING: json_schema response_format non supportato dal deployment: {schema_exc}")
+            fallback_settings = AzureChatPromptExecutionSettings(
+                tool_choice="auto",
+                parallel_tool_calls=False,
+                function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
+            )
+            result = await kernel.invoke(
+                chat_function,
+                KernelArguments(settings=fallback_settings, city=city, weather=weather),
+            )
+
         result_str = str(result)
     except Exception as e:
         # LOG THE FULL ERROR TO CONSOLE
@@ -171,18 +274,10 @@ async def suggest_activity(request: TaskRequest):
         if hasattr(e, 'inner_exception'):
             print(f"INNER ERROR: {e.inner_exception}")
 
-        return {
-            "jsonrpc": "2.0",
-            "error": {"code": -32603, "message": f"Agente non disponibile: {str(e)}"},
-            "id": request.id
-        }
+        return rpc_error_response(request.id, -32603, f"Agente non disponibile: {str(e)}")
 
     # --- Format and Return Response ---
     try:
-        # Clean the response string
-        if '```json' in result_str:
-            result_str = result_str.split('```json')[1].split('```')[0].strip()
-
         suggested_activities = json.loads(result_str)
         validated_response = ActivityResponse.model_validate(suggested_activities)
 
@@ -191,25 +286,20 @@ async def suggest_activity(request: TaskRequest):
         print(f"JSONDecodeError: {e}")
         print(f"Malformed response: {str(result)}")
 
-        # Return a JSON-RPC error response
-        return {
-            "jsonrpc": "2.0",
-            "error": {
-                "code": -32603,
-                "message": "Errore interno: impossibile decodificare il JSON dalla risposta AI."
-            },
-            "id": request.id
-        }
+        return rpc_error_response(
+            request.id,
+            -32603,
+            "Errore interno: impossibile decodificare il JSON dalla risposta AI.",
+            data={"raw_response": result_str},
+        )
     except ValidationError as e:
         print(f"ValidationError: {e}")
-        return {
-            "jsonrpc": "2.0",
-            "error": {
-                "code": -32603,
-                "message": "Errore interno: schema di risposta non valido nell'output AI."
-            },
-            "id": request.id
-        }
+        return rpc_error_response(
+            request.id,
+            -32603,
+            "Errore interno: schema di risposta non valido nell'output AI.",
+            data={"validation_errors": e.errors(include_url=False)},
+        )
 
     return {
         "jsonrpc": "2.0",

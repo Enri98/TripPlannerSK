@@ -1,10 +1,66 @@
+from __future__ import annotations
+
 import json
 import logging
+from typing import Any
 
 import httpx
+from pydantic import BaseModel, ConfigDict, ValidationError
 from semantic_kernel.functions import kernel_function
 
 LOGGER = logging.getLogger(__name__)
+
+
+class RpcError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: int | str
+    message: str
+    data: dict[str, Any] | list[Any] | str | None = None
+
+
+class RpcEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    jsonrpc: str
+    id: int | str | None = None
+    result: dict[str, Any] | None = None
+    error: RpcError | None = None
+
+
+class ActivityItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    type: str
+    description: str
+
+
+class ActivityResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    activities: list[ActivityItem]
+    note: str | None = None
+
+
+class RestaurantItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    type: str
+    price_range: str
+
+
+class RestaurantResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    restaurants: list[RestaurantItem]
+    note: str | None = None
+
+
+RpcEnvelope.model_rebuild()
+ActivityResponse.model_rebuild()
+RestaurantResponse.model_rebuild()
 
 
 class AgentCardResolver:
@@ -35,21 +91,38 @@ class DiscoveryPlugin:
         self._activity_resolver = AgentCardResolver("http://localhost:8081/.well-known/agent-card.json")
         self._restaurant_resolver = AgentCardResolver("http://localhost:8082/.well-known/agent-card.json")
 
-    def _rpc_error(self, code: str, message: str, rpc_id: int | str | None = 1) -> str:
-        return json.dumps(
-            {
-                "jsonrpc": "2.0",
-                "error": {"code": code, "message": message},
-                "id": rpc_id,
-            },
-            ensure_ascii=True,
-        )
+    def _rpc_error(
+        self,
+        code: str,
+        message: str,
+        rpc_id: int | str | None = 1,
+        data: dict[str, Any] | list[Any] | str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"code": code, "message": message}
+        if data is not None:
+            payload["data"] = data
+        return {"jsonrpc": "2.0", "error": payload, "id": rpc_id}
+
+    def _error_payload(
+        self,
+        code: str,
+        message: str,
+        rpc_id: int | str | None = 1,
+        data: dict[str, Any] | list[Any] | str | None = None,
+    ) -> dict[str, Any]:
+        return self._rpc_error(code=code, message=message, rpc_id=rpc_id, data=data)["error"]
 
     async def close(self) -> None:
         if self._owns_client and not self._client.is_closed:
             await self._client.aclose()
 
-    async def _post_task(self, resolver: AgentCardResolver, payload: dict, error_prefix: str) -> str:
+    async def _post_task(
+        self,
+        resolver: AgentCardResolver,
+        payload: dict[str, Any],
+        error_prefix: str,
+        expected_result_model: type[BaseModel],
+    ) -> dict[str, Any]:
         rpc_id = payload.get("id")
         try:
             endpoint = await resolver.resolve_endpoint(self._client)
@@ -58,54 +131,91 @@ class DiscoveryPlugin:
             body = response.json()
         except httpx.ConnectError as exc:
             LOGGER.exception("%s is offline", error_prefix, extra={"error": str(exc)})
-            return self._rpc_error(
-                code=f"{error_prefix.lower()}_offline",
-                message=f"{error_prefix} non raggiungibile: {exc}",
-                rpc_id=rpc_id,
-            )
+            return {
+                "error": self._error_payload(
+                    code=f"{error_prefix.lower()}_offline",
+                    message=f"{error_prefix} non raggiungibile: {exc}",
+                    rpc_id=rpc_id,
+                )
+            }
         except httpx.TimeoutException as exc:
             LOGGER.exception("%s timed out", error_prefix, extra={"error": str(exc)})
-            return self._rpc_error(
-                code=f"{error_prefix.lower()}_timeout",
-                message=f"Timeout su {error_prefix}: {exc}",
-                rpc_id=rpc_id,
-            )
+            return {
+                "error": self._error_payload(
+                    code=f"{error_prefix.lower()}_timeout",
+                    message=f"Timeout su {error_prefix}: {exc}",
+                    rpc_id=rpc_id,
+                )
+            }
         except httpx.HTTPStatusError as exc:
             LOGGER.exception("%s returned HTTP error", error_prefix, extra={"status_code": exc.response.status_code})
-            return self._rpc_error(
-                code=f"{error_prefix.lower()}_http_error",
-                message=f"Errore HTTP {exc.response.status_code} su {error_prefix}",
-                rpc_id=rpc_id,
-            )
+            return {
+                "error": self._error_payload(
+                    code=f"{error_prefix.lower()}_http_error",
+                    message=f"Errore HTTP {exc.response.status_code} su {error_prefix}",
+                    rpc_id=rpc_id,
+                )
+            }
         except httpx.RequestError as exc:
             LOGGER.exception("%s request failed", error_prefix, extra={"error": str(exc)})
-            return self._rpc_error(
-                code=f"{error_prefix.lower()}_request_error",
-                message=f"Richiesta non riuscita: {exc}",
-                rpc_id=rpc_id,
-            )
+            return {
+                "error": self._error_payload(
+                    code=f"{error_prefix.lower()}_request_error",
+                    message=f"Richiesta non riuscita: {exc}",
+                    rpc_id=rpc_id,
+                )
+            }
         except (ValueError, KeyError) as exc:
             LOGGER.exception("%s discovery/response validation failed", error_prefix, extra={"error": str(exc)})
-            return self._rpc_error(
-                code=f"{error_prefix.lower()}_invalid_response",
-                message=str(exc),
-                rpc_id=rpc_id,
-            )
+            return {
+                "error": self._error_payload(
+                    code=f"{error_prefix.lower()}_invalid_response",
+                    message=str(exc),
+                    rpc_id=rpc_id,
+                )
+            }
 
-        if "error" in body:
-            LOGGER.error("%s returned RPC error", error_prefix, extra={"error": body.get("error")})
-            return json.dumps({"jsonrpc": "2.0", "error": body["error"], "id": rpc_id}, ensure_ascii=True)
+        try:
+            envelope = RpcEnvelope.model_validate(body)
+        except ValidationError as exc:
+            LOGGER.exception("%s invalid RPC envelope", error_prefix, extra={"error": str(exc), "body": body})
+            return {
+                "error": self._error_payload(
+                    code=f"{error_prefix.lower()}_invalid_rpc_envelope",
+                    message="Envelope JSON-RPC non valido.",
+                    rpc_id=rpc_id,
+                    data={"validation_errors": exc.errors(include_url=False), "body": body},
+                )
+            }
 
-        result = body.get("result")
-        if result is None:
+        if envelope.error is not None:
+            LOGGER.error("%s returned RPC error", error_prefix, extra={"error": envelope.error.model_dump(mode="json")})
+            return {"error": envelope.error.model_dump(mode="json")}
+
+        if envelope.result is None:
             LOGGER.error("%s response missing result", error_prefix, extra={"body": body})
-            return self._rpc_error(
-                code=f"{error_prefix.lower()}_missing_result",
-                message="Risultato mancante nella risposta.",
-                rpc_id=rpc_id,
-            )
+            return {
+                "error": self._error_payload(
+                    code=f"{error_prefix.lower()}_missing_result",
+                    message="Risultato mancante nella risposta.",
+                    rpc_id=rpc_id,
+                )
+            }
 
-        return json.dumps(result, ensure_ascii=True)
+        try:
+            validated_result = expected_result_model.model_validate(envelope.result)
+        except ValidationError as exc:
+            LOGGER.exception("%s result schema validation failed", error_prefix, extra={"error": str(exc)})
+            return {
+                "error": self._error_payload(
+                    code=f"{error_prefix.lower()}_invalid_result_schema",
+                    message="Lo schema del risultato ricevuto dall'agente non e valido.",
+                    rpc_id=rpc_id,
+                    data={"validation_errors": exc.errors(include_url=False), "result": envelope.result},
+                )
+            }
+
+        return validated_result.model_dump(mode="json")
 
     @kernel_function(description="Chiama ActivityAgent con contesto di citta e meteo.")
     async def call_activity_agent(self, city: str, weather: str) -> str:
@@ -118,7 +228,13 @@ class DiscoveryPlugin:
             },
             "id": 1,
         }
-        return await self._post_task(self._activity_resolver, payload, "activity_agent")
+        result = await self._post_task(
+            self._activity_resolver,
+            payload,
+            "activity_agent",
+            expected_result_model=ActivityResponse,
+        )
+        return json.dumps(result, ensure_ascii=True)
 
     @kernel_function(description="Chiama RestaurantAgent con citta e preferenza di cucina.")
     async def call_restaurant_agent(self, city: str, cuisine_preference: str) -> str:
@@ -131,4 +247,10 @@ class DiscoveryPlugin:
             },
             "id": 1,
         }
-        return await self._post_task(self._restaurant_resolver, payload, "restaurant_agent")
+        result = await self._post_task(
+            self._restaurant_resolver,
+            payload,
+            "restaurant_agent",
+            expected_result_model=RestaurantResponse,
+        )
+        return json.dumps(result, ensure_ascii=True)
