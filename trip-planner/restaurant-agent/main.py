@@ -6,7 +6,7 @@ from typing import Optional
 from anyio import Path as AnyioPath
 from dotenv import load_dotenv
 from fastapi import FastAPI, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, ValidationError
 from semantic_kernel import Kernel
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChatPromptExecutionSettings
@@ -28,6 +28,21 @@ class TaskRequest(BaseModel):
     method: str
     params: TaskRequestParams
     id: Optional[int] = None
+
+
+class RestaurantItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    type: str
+    price_range: str
+
+
+class RestaurantResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    restaurants: list[RestaurantItem]
+    note: str | None = None
 
 
 BASE_DIR = Path(__file__).parent
@@ -149,6 +164,7 @@ async def suggest_restaurant(request: TaskRequest):
             result_str = result_str.split("```", 1)[1].split("```", 1)[0].strip()
 
         selected = json.loads(result_str)
+        validated_response = RestaurantResponse.model_validate(selected)
     except json.JSONDecodeError as e:
         print(f"JSONDecodeError: {e}")
         print(f"Malformed response: {result_str}")
@@ -161,10 +177,20 @@ async def suggest_restaurant(request: TaskRequest):
             },
             "id": request.id,
         }
+    except ValidationError as e:
+        print(f"ValidationError: {e}")
+        return {
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32603,
+                "message": "Internal error: Invalid response schema from AI output.",
+            },
+            "id": request.id,
+        }
 
     return {
         "jsonrpc": "2.0",
-        "result": selected,
+        "result": validated_response.model_dump(mode="json"),
         "id": request.id,
     }
 

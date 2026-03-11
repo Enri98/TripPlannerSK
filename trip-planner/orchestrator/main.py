@@ -13,7 +13,10 @@ from semantic_kernel.connectors.mcp import MCPStdioPlugin
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChatPromptExecutionSettings
 from semantic_kernel.functions import KernelArguments
 
-from plugins.discovery_plugin import DiscoveryPlugin
+try:
+    from orchestrator.plugins.discovery_plugin import DiscoveryPlugin
+except ImportError:
+    from plugins.discovery_plugin import DiscoveryPlugin
 
 LOGGER = logging.getLogger("trip_orchestrator")
 SYSTEM_INSTRUCTIONS = (
@@ -28,8 +31,11 @@ SYSTEM_INSTRUCTIONS = (
     "In your final response, clearly state that weather data was unavailable for the requested date. "
     "4. Output a strictly structured JSON object containing ALL three categories: "
     "weather_data, activity_suggestions, and restaurant_recommendations. "
+    "Set activity_suggestions to the exact ActivityAgent result object and preserve its keys exactly "
+    "(activities and optional note). "
+    "Set restaurant_recommendations to the exact RestaurantAgent result object and preserve its keys exactly "
+    "(restaurants and optional note). "
     "Weather data may be 'Unknown'; still provide activities and restaurants. "
-    "If tools include a note field, preserve it in the final JSON as note. "
     "Do not write prose. "
     "If a non-weather tool fails, report the error JSON."
 )
@@ -75,16 +81,8 @@ def build_system_instructions() -> str:
 
 
 def present_itinerary(raw_json: str) -> None:
-    cleaned = raw_json.strip()
-    if "```json" in cleaned:
-        cleaned = cleaned.split("```json", 1)[1]
-        cleaned = cleaned.split("```", 1)[0].strip()
-    elif "```" in cleaned:
-        cleaned = cleaned.split("```", 1)[1]
-        cleaned = cleaned.split("```", 1)[0].strip()
-
     try:
-        parsed = json.loads(cleaned)
+        parsed = json.loads(raw_json)
     except json.JSONDecodeError:
         print("----- RAW AGENT OUTPUT -----")
         print(raw_json)

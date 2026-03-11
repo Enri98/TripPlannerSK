@@ -5,7 +5,7 @@ from typing import Optional
 
 from anyio import Path as AnyioPath
 from fastapi import FastAPI, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, ValidationError
 import uvicorn
 from semantic_kernel import Kernel
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
@@ -28,6 +28,21 @@ class TaskRequest(BaseModel):
     method: str
     params: TaskRequestParams
     id: Optional[int] = None
+
+
+class ActivityItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    type: str
+    description: str
+
+
+class ActivityResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    activities: list[ActivityItem]
+    note: str | None = None
 
 # --- File Paths ---
 BASE_DIR = Path(__file__).parent
@@ -169,6 +184,7 @@ async def suggest_activity(request: TaskRequest):
             result_str = result_str.split('```json')[1].split('```')[0].strip()
 
         suggested_activities = json.loads(result_str)
+        validated_response = ActivityResponse.model_validate(suggested_activities)
 
     except json.JSONDecodeError as e:
         # Log the error for debugging
@@ -184,10 +200,20 @@ async def suggest_activity(request: TaskRequest):
             },
             "id": request.id
         }
+    except ValidationError as e:
+        print(f"ValidationError: {e}")
+        return {
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32603,
+                "message": "Internal error: Invalid response schema from AI output."
+            },
+            "id": request.id
+        }
 
     return {
         "jsonrpc": "2.0",
-        "result": suggested_activities,
+        "result": validated_response.model_dump(mode="json"),
         "id": request.id
     }
 
