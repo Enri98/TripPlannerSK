@@ -12,6 +12,7 @@ from semantic_kernel.connectors.ai.open_ai import AzureChatPromptExecutionSettin
 from semantic_kernel.connectors.mcp import MCPStdioPlugin
 from semantic_kernel.functions import KernelArguments
 
+from helpers import is_schema_response_format_unsupported
 from orchestrator.main import (
     ActivityResponse,
     AgentErrorPayload,
@@ -23,7 +24,6 @@ from orchestrator.main import (
     build_orchestrator_agent,
     build_weather_mcp_plugin,
     configure_logging,
-    is_schema_response_format_unsupported,
     load_environment,
 )
 

@@ -1,8 +1,8 @@
 import json
 import os
-from copy import deepcopy
+import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from anyio import Path as AnyioPath
 from dotenv import load_dotenv
@@ -14,6 +14,11 @@ from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChat
 from semantic_kernel.functions import KernelArguments, kernel_function
 import uvicorn
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from helpers import create_rpc_error, get_structured_output_settings, is_schema_response_format_unsupported
 from memory import RESTAURANT_DB
 
 app = FastAPI()
@@ -44,97 +49,6 @@ class RestaurantResponse(BaseModel):
 
     restaurants: list[RestaurantItem]
     note: str | None = None
-
-
-def _normalize_schema_for_structured_outputs(schema: dict[str, Any]) -> dict[str, Any]:
-    normalized = deepcopy(schema)
-
-    def walk(node: Any) -> None:
-        if isinstance(node, dict):
-            properties = node.get("properties")
-            if isinstance(properties, dict):
-                # Azure/OpenAI strict schema expects every property listed as required.
-                node["required"] = list(properties.keys())
-                node.setdefault("additionalProperties", False)
-
-            for key in ("$defs", "definitions", "properties", "patternProperties", "dependentSchemas"):
-                child_map = node.get(key)
-                if isinstance(child_map, dict):
-                    for child in child_map.values():
-                        walk(child)
-
-            for key in ("items", "contains", "if", "then", "else", "not", "propertyNames"):
-                child = node.get(key)
-                if isinstance(child, dict):
-                    walk(child)
-
-            for key in ("allOf", "anyOf", "oneOf", "prefixItems"):
-                child_list = node.get(key)
-                if isinstance(child_list, list):
-                    for child in child_list:
-                        walk(child)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item)
-
-    walk(normalized)
-    return normalized
-
-
-def build_response_format_from_model(model: type[BaseModel], schema_name: str) -> dict[str, Any]:
-    normalized_schema = _normalize_schema_for_structured_outputs(model.model_json_schema())
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": schema_name,
-            "strict": True,
-            "schema": normalized_schema,
-        },
-    }
-
-
-def is_schema_response_format_unsupported(exc: Exception) -> bool:
-    def collect_messages(error: BaseException, seen: set[int]) -> list[str]:
-        if id(error) in seen:
-            return []
-        seen.add(id(error))
-
-        messages = [str(error), repr(error)]
-        inner = getattr(error, "inner_exception", None)
-        if isinstance(inner, BaseException):
-            messages.extend(collect_messages(inner, seen))
-        cause = getattr(error, "__cause__", None)
-        if isinstance(cause, BaseException):
-            messages.extend(collect_messages(cause, seen))
-        context = getattr(error, "__context__", None)
-        if isinstance(context, BaseException):
-            messages.extend(collect_messages(context, seen))
-        return messages
-
-    error_text = " ".join(collect_messages(exc, set())).lower()
-    markers = (
-        "response_format",
-        "json_schema",
-        "schema",
-        "unsupported",
-        "not supported",
-        "invalid",
-        "bad request",
-        "required",
-    )
-    return any(marker in error_text for marker in markers)
-
-
-def rpc_error_response(
-    rpc_id: int | None,
-    code: int,
-    message: str,
-    data: dict[str, Any] | list[Any] | str | None = None,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {"code": code, "message": message}
-    if data is not None:
-        payload["data"] = data
-    return {"jsonrpc": "2.0", "error": payload, "id": rpc_id}
 
 
 BASE_DIR = Path(__file__).parent
@@ -202,7 +116,7 @@ async def suggest_restaurant(request: TaskRequest):
     cuisine_type = request.params.cuisine_type
 
     if RestaurantSearchPlugin._resolve_city_key(city) is None:
-        return rpc_error_response(request.id, -32602, "Citta non supportata")
+        return create_rpc_error(-32602, "Citta non supportata", request.id)
 
     kernel = Kernel()
 
@@ -225,7 +139,7 @@ async def suggest_restaurant(request: TaskRequest):
         execution_settings = AzureChatPromptExecutionSettings(
             tool_choice="auto",
             parallel_tool_calls=False,
-            response_format=build_response_format_from_model(RestaurantResponse, "restaurant_response"),
+            response_format=get_structured_output_settings(RestaurantResponse),
             function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
         )
 
@@ -255,7 +169,7 @@ async def suggest_restaurant(request: TaskRequest):
         if hasattr(e, "inner_exception"):
             print(f"INNER ERROR: {e.inner_exception}")
 
-        return rpc_error_response(request.id, -32603, f"Agente non disponibile: {str(e)}")
+        return create_rpc_error(-32603, f"Agente non disponibile: {str(e)}", request.id)
 
     try:
         selected = json.loads(result_str)
@@ -264,20 +178,22 @@ async def suggest_restaurant(request: TaskRequest):
         print(f"JSONDecodeError: {e}")
         print(f"Malformed response: {result_str}")
 
-        return rpc_error_response(
-            request.id,
+        error_payload = create_rpc_error(
             -32603,
             "Errore interno: impossibile decodificare il JSON dalla risposta AI.",
-            data={"raw_response": result_str},
+            request.id,
         )
+        error_payload["error"]["data"] = {"raw_response": result_str}
+        return error_payload
     except ValidationError as e:
         print(f"ValidationError: {e}")
-        return rpc_error_response(
-            request.id,
+        error_payload = create_rpc_error(
             -32603,
             "Errore interno: schema di risposta non valido nell'output AI.",
-            data={"validation_errors": e.errors(include_url=False)},
+            request.id,
         )
+        error_payload["error"]["data"] = {"validation_errors": e.errors(include_url=False)}
+        return error_payload
 
     return {
         "jsonrpc": "2.0",

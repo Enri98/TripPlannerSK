@@ -1,6 +1,5 @@
 import logging
 import os
-from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,6 +11,7 @@ from semantic_kernel.agents import ChatCompletionAgent
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
 from semantic_kernel.connectors.mcp import MCPStdioPlugin
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChatPromptExecutionSettings
+from helpers import get_structured_output_settings
 
 try:
     from orchestrator.plugins.discovery_plugin import DiscoveryPlugin
@@ -93,85 +93,6 @@ class TripDirectorResponse(BaseModel):
     note: str | None = None
 
 
-def _normalize_schema_for_structured_outputs(schema: dict[str, Any]) -> dict[str, Any]:
-    normalized = deepcopy(schema)
-
-    def walk(node: Any) -> None:
-        if isinstance(node, dict):
-            properties = node.get("properties")
-            if isinstance(properties, dict):
-                # Azure/OpenAI strict schema expects every property listed as required.
-                node["required"] = list(properties.keys())
-                node.setdefault("additionalProperties", False)
-
-            for key in ("$defs", "definitions", "properties", "patternProperties", "dependentSchemas"):
-                child_map = node.get(key)
-                if isinstance(child_map, dict):
-                    for child in child_map.values():
-                        walk(child)
-
-            for key in ("items", "contains", "if", "then", "else", "not", "propertyNames"):
-                child = node.get(key)
-                if isinstance(child, dict):
-                    walk(child)
-
-            for key in ("allOf", "anyOf", "oneOf", "prefixItems"):
-                child_list = node.get(key)
-                if isinstance(child_list, list):
-                    for child in child_list:
-                        walk(child)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item)
-
-    walk(normalized)
-    return normalized
-
-
-def build_response_format_from_model(model: type[BaseModel], schema_name: str) -> dict[str, Any]:
-    normalized_schema = _normalize_schema_for_structured_outputs(model.model_json_schema())
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": schema_name,
-            "strict": True,
-            "schema": normalized_schema,
-        },
-    }
-
-
-def is_schema_response_format_unsupported(exc: Exception) -> bool:
-    def collect_messages(error: BaseException, seen: set[int]) -> list[str]:
-        if id(error) in seen:
-            return []
-        seen.add(id(error))
-
-        messages = [str(error), repr(error)]
-        inner = getattr(error, "inner_exception", None)
-        if isinstance(inner, BaseException):
-            messages.extend(collect_messages(inner, seen))
-        cause = getattr(error, "__cause__", None)
-        if isinstance(cause, BaseException):
-            messages.extend(collect_messages(cause, seen))
-        context = getattr(error, "__context__", None)
-        if isinstance(context, BaseException):
-            messages.extend(collect_messages(context, seen))
-        return messages
-
-    error_text = " ".join(collect_messages(exc, set())).lower()
-    markers = (
-        "response_format",
-        "json_schema",
-        "schema",
-        "unsupported",
-        "not supported",
-        "invalid",
-        "bad request",
-        "required",
-    )
-    return any(marker in error_text for marker in markers)
-
-
 def configure_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -243,5 +164,5 @@ def build_execution_settings() -> AzureChatPromptExecutionSettings:
     return AzureChatPromptExecutionSettings(
         tool_choice="auto",
         parallel_tool_calls=False,
-        response_format=build_response_format_from_model(TripDirectorResponse, "trip_director_response"),
+        response_format=get_structured_output_settings(TripDirectorResponse),
     )
