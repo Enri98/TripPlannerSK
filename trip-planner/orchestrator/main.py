@@ -1,5 +1,3 @@
-import asyncio
-import json
 import logging
 import os
 from copy import deepcopy
@@ -8,13 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
 from semantic_kernel import Kernel
 from semantic_kernel.agents import ChatCompletionAgent
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
 from semantic_kernel.connectors.mcp import MCPStdioPlugin
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChatPromptExecutionSettings
-from semantic_kernel.functions import KernelArguments
 
 try:
     from orchestrator.plugins.discovery_plugin import DiscoveryPlugin
@@ -214,158 +211,37 @@ def build_system_instructions() -> str:
     )
 
 
-def present_itinerary(raw_json: str) -> None:
-    try:
-        parsed = TripDirectorResponse.model_validate_json(raw_json)
-    except ValidationError as exc:
-        try:
-            fallback = json.loads(raw_json)
-        except json.JSONDecodeError:
-            print("----- RAW AGENT OUTPUT -----")
-            print(raw_json)
-            return
+def build_weather_mcp_plugin() -> MCPStdioPlugin:
+    project_root = Path(__file__).resolve().parents[2]
+    app_root = Path(__file__).resolve().parents[1]
+    weather_server_script = project_root / "mcp-weather-server" / "server.py"
+    python_executable = app_root / ".venv" / "Scripts" / "python.exe"
 
-        print("----- ERRORE VALIDAZIONE SCHEMA ORCHESTRATOR -----")
-        print(str(exc))
-        print(json.dumps(fallback, indent=2, ensure_ascii=True))
-        return
-    weather_data = parsed.weather_data
-    activities_data = parsed.activity_suggestions
-    restaurants_data = parsed.restaurant_recommendations
-    note = parsed.note
+    if not python_executable.exists():
+        raise FileNotFoundError(f"Interprete del virtual environment non trovato in: {python_executable}")
+    if not weather_server_script.exists():
+        raise FileNotFoundError(f"Server meteo MCP non trovato in: {weather_server_script}")
 
-    activities: list[ActivityItem] = []
-    restaurants: list[RestaurantItem] = []
-    weather_text = weather_data if isinstance(weather_data, str) else json.dumps(weather_data, ensure_ascii=True)
-
-    print("--- IL TUO VIAGGIO ---")
-    print(f"Meteo attuale: {weather_text}")
-
-    if isinstance(activities_data, ActivityResponse):
-        note = activities_data.note or note
-        activities = activities_data.activities
-    if isinstance(restaurants_data, RestaurantResponse):
-        note = restaurants_data.note or note
-        restaurants = restaurants_data.restaurants
-
-    if note is not None:
-        print(f"Nota: {note}")
-
-    if isinstance(activities_data, AgentErrorPayload):
-        print("Attivita consigliate:")
-        print(f"- ERRORE servizio attivita: {activities_data.error.message} ({activities_data.error.code})")
-    else:
-        print("Attivita consigliate:")
-        if not activities:
-            print("- Nessuna attivita disponibile.")
-        else:
-            for item in activities:
-                print(f"- {item.name} [{item.type}] - {item.description}")
-
-    if isinstance(restaurants_data, AgentErrorPayload):
-        print("Ristoranti consigliati:")
-        print(f"- ERRORE servizio ristoranti: {restaurants_data.error.message} ({restaurants_data.error.code})")
-        return
-
-    print("Ristoranti consigliati:")
-    if not restaurants:
-        print("- Nessun suggerimento ristorante disponibile.")
-        return
-
-    for item in restaurants:
-        print(f"- {item.name} [{item.type}] - Prezzo: {item.price_range}")
-
-
-async def run_console() -> None:
-    configure_logging()
-    load_environment()
-
-    travel_services_plugin = DiscoveryPlugin()
-    kernel = build_kernel(travel_services_plugin)
-
-    weather_server_script = Path(__file__).resolve().parents[2] / "mcp-weather-server" / "server.py"
-    python_executable = str((Path(__file__).resolve().parents[1] / ".venv" / "Scripts" / "python.exe").resolve())
-
-    mcp_plugin = MCPStdioPlugin(
+    return MCPStdioPlugin(
         name="WeatherMcp",
-        command=python_executable,
+        command=str(python_executable),
         args=[str(weather_server_script)],
         request_timeout=30,
     )
 
-    try:
-        await mcp_plugin.connect()
-        await mcp_plugin.load_tools()
-        kernel.add_plugin(mcp_plugin)
-    except Exception:
-        LOGGER.exception("Failed to initialize MCP weather plugin")
-        print(
-            "Impossibile avviare lo strumento meteo (sottoprocesso MCP non riuscito). "
-            "Controlla mcp-weather-server e riprova."
-        )
-        return
 
-    try:
-        runtime_system_instructions = build_system_instructions()
-        agent = ChatCompletionAgent(
-            name="TripOrchestrator",
-            instructions=runtime_system_instructions,
-            kernel=kernel,
-            function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
-        )
-
-        print("Trip Orchestrator pronto. Inserisci la tua richiesta (oppure 'exit').")
-        while True:
-            user_input = input("\nTu> ").strip()
-            if user_input.lower() in {"exit", "quit"}:
-                print("Arrivederci.")
-                return
-            if not user_input:
-                continue
-
-            execution_settings = AzureChatPromptExecutionSettings(
-                tool_choice="auto",
-                parallel_tool_calls=False,
-                response_format=build_response_format_from_model(TripDirectorResponse, "trip_director_response"),
-            )
-
-            try:
-                response = await agent.get_response(
-                    messages=user_input,
-                    arguments=KernelArguments(settings=execution_settings),
-                )
-            except Exception as schema_exc:
-                if not is_schema_response_format_unsupported(schema_exc):
-                    raise
-
-                LOGGER.warning(
-                    "json_schema response_format non supportato dal deployment, fallback a validazione post-invoke: %s",
-                    schema_exc,
-                )
-                fallback_settings = AzureChatPromptExecutionSettings(
-                    tool_choice="auto",
-                    parallel_tool_calls=False,
-                )
-                response = await agent.get_response(
-                    messages=user_input,
-                    arguments=KernelArguments(settings=fallback_settings),
-                )
-
-            content = str(response.message.content)
-            print("\n----- RAW JSON RESPONSE -----")
-            print(content)
-            print()
-            present_itinerary(content)
-    finally:
-        try:
-            await mcp_plugin.close()
-        except Exception:
-            LOGGER.warning("MCP weather plugin closed with errors.")
-        try:
-            await travel_services_plugin.close()
-        except Exception:
-            LOGGER.warning("Travel services plugin closed with errors.")
+def build_orchestrator_agent(kernel: Kernel) -> ChatCompletionAgent:
+    return ChatCompletionAgent(
+        name="TripOrchestrator",
+        instructions=build_system_instructions(),
+        kernel=kernel,
+        function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
+    )
 
 
-if __name__ == "__main__":
-    asyncio.run(run_console())
+def build_execution_settings() -> AzureChatPromptExecutionSettings:
+    return AzureChatPromptExecutionSettings(
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        response_format=build_response_format_from_model(TripDirectorResponse, "trip_director_response"),
+    )

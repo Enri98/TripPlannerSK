@@ -1,64 +1,31 @@
 import asyncio
 import json
-from pathlib import Path
 
 import httpx
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import ValidationError
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 from semantic_kernel.agents import ChatCompletionAgent
-from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
 from semantic_kernel.connectors.ai.open_ai import AzureChatPromptExecutionSettings
 from semantic_kernel.connectors.mcp import MCPStdioPlugin
 from semantic_kernel.functions import KernelArguments
 
 from orchestrator.main import (
+    ActivityResponse,
+    AgentErrorPayload,
     DiscoveryPlugin,
+    RestaurantResponse,
+    TripDirectorResponse,
+    build_execution_settings,
     build_kernel,
-    build_system_instructions,
+    build_orchestrator_agent,
+    build_weather_mcp_plugin,
     configure_logging,
+    is_schema_response_format_unsupported,
     load_environment,
 )
-
-
-class ActivityItem(BaseModel):
-    name: str
-    type: str
-    description: str
-
-
-class RpcError(BaseModel):
-    code: int | str
-    message: str
-
-
-class ActivityResponse(BaseModel):
-    activities: list[ActivityItem] | None = None
-    error: RpcError | dict | None = None
-    note: str | None = None
-
-
-class RestaurantItem(BaseModel):
-    name: str
-    type: str
-    price_range: str
-
-
-class RestaurantResponse(BaseModel):
-    restaurants: list[RestaurantItem] | None = None
-    error: RpcError | dict | None = None
-    note: str | None = None
-
-
-class TripDirectorResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    weather_data: str | dict | list
-    activity_suggestions: ActivityResponse
-    restaurant_recommendations: RestaurantResponse
-    note: str | None = None
 
 
 async def initialize_runtime(console: Console) -> tuple[
@@ -75,32 +42,13 @@ async def initialize_runtime(console: Console) -> tuple[
     mcp_plugin: MCPStdioPlugin | None = None
     try:
         kernel = build_kernel(discovery_plugin)
-
-        weather_server_script = Path(__file__).resolve().parents[1] / "mcp-weather-server" / "server.py"
-        python_executable = Path(__file__).resolve().parent / ".venv" / "Scripts" / "python.exe"
-
-        if not python_executable.exists():
-            raise FileNotFoundError(f"Interprete del virtual environment non trovato in: {python_executable}")
-        if not weather_server_script.exists():
-            raise FileNotFoundError(f"Server meteo MCP non trovato in: {weather_server_script}")
-
-        mcp_plugin = MCPStdioPlugin(
-            name="WeatherMcp",
-            command=str(python_executable),
-            args=[str(weather_server_script)],
-            request_timeout=30,
-        )
+        mcp_plugin = build_weather_mcp_plugin()
 
         await mcp_plugin.connect()
         await mcp_plugin.load_tools()
         kernel.add_plugin(mcp_plugin)
 
-        agent = ChatCompletionAgent(
-            name="TripOrchestrator",
-            instructions=build_system_instructions(),
-            kernel=kernel,
-            function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
-        )
+        agent = build_orchestrator_agent(kernel)
         console.print("[bold green]Trip Planner pronto.[/bold green] Scrivi 'exit' per uscire.")
 
         return agent, discovery_plugin, mcp_plugin, shared_client
@@ -135,11 +83,17 @@ async def shutdown_runtime(
 
 
 async def present_itinerary(console: Console, raw_json: str) -> None:
+    payload = raw_json.strip()
+    if payload.startswith("```"):
+        lines = payload.splitlines()
+        if len(lines) >= 2 and lines[-1].strip() == "```":
+            payload = "\n".join(lines[1:-1]).strip()
+
     try:
-        itinerary = TripDirectorResponse.model_validate_json(raw_json)
+        itinerary = TripDirectorResponse.model_validate_json(payload)
     except ValidationError as exc:
         try:
-            parsed = json.loads(raw_json)
+            parsed = json.loads(payload)
         except json.JSONDecodeError:
             console.print(
                 Panel(
@@ -148,7 +102,7 @@ async def present_itinerary(console: Console, raw_json: str) -> None:
                     border_style="red",
                 )
             )
-            console.print(raw_json)
+            console.print(payload)
             return
 
         if isinstance(parsed, dict) and "error" in parsed:
@@ -175,17 +129,18 @@ async def present_itinerary(console: Console, raw_json: str) -> None:
     weather_text = weather if isinstance(weather, str) else json.dumps(weather, indent=2, ensure_ascii=True)
     console.print(Panel(weather_text, title="Meteo", border_style="cyan"))
 
-    note = itinerary.activity_suggestions.note or itinerary.restaurant_recommendations.note or itinerary.note
+    activity_note = itinerary.activity_suggestions.note if isinstance(itinerary.activity_suggestions, ActivityResponse) else None
+    restaurant_note = (
+        itinerary.restaurant_recommendations.note
+        if isinstance(itinerary.restaurant_recommendations, RestaurantResponse)
+        else None
+    )
+    note = activity_note or restaurant_note or itinerary.note
     if note:
         console.print(Panel(note, title="Nota", border_style="yellow"))
 
-    if itinerary.activity_suggestions.error:
-        error_obj = itinerary.activity_suggestions.error
-        error_text = (
-            json.dumps(error_obj.model_dump(mode="json"), indent=2, ensure_ascii=True)
-            if isinstance(error_obj, RpcError)
-            else json.dumps(error_obj, indent=2, ensure_ascii=True)
-        )
+    if isinstance(itinerary.activity_suggestions, AgentErrorPayload):
+        error_text = json.dumps(itinerary.activity_suggestions.error.model_dump(mode="json"), indent=2, ensure_ascii=True)
         console.print(Panel(error_text, title="Servizio non disponibile: attivita", border_style="red"))
     else:
         activities_table = Table(title="Attivita consigliate")
@@ -200,12 +155,11 @@ async def present_itinerary(console: Console, raw_json: str) -> None:
             activities_table.add_row("-", "-", "Nessuna attivita disponibile.")
         console.print(activities_table)
 
-    if itinerary.restaurant_recommendations.error:
-        error_obj = itinerary.restaurant_recommendations.error
-        error_text = (
-            json.dumps(error_obj.model_dump(mode="json"), indent=2, ensure_ascii=True)
-            if isinstance(error_obj, RpcError)
-            else json.dumps(error_obj, indent=2, ensure_ascii=True)
+    if isinstance(itinerary.restaurant_recommendations, AgentErrorPayload):
+        error_text = json.dumps(
+            itinerary.restaurant_recommendations.error.model_dump(mode="json"),
+            indent=2,
+            ensure_ascii=True,
         )
         console.print(Panel(error_text, title="Servizio non disponibile: ristoranti", border_style="red"))
     else:
@@ -244,17 +198,25 @@ async def run_console_app() -> None:
                 continue
 
             user_message = f"Pianifica un viaggio a {destination}."
-            execution_settings = AzureChatPromptExecutionSettings(
-                tool_choice="auto",
-                parallel_tool_calls=False,
-                response_format={"type": "json_object"},
-            )
+            execution_settings = build_execution_settings()
 
             with console.status("[bold green]Sto pianificando il tuo viaggio..."):
-                response = await agent.get_response(
-                    messages=user_message,
-                    arguments=KernelArguments(settings=execution_settings),
-                )
+                try:
+                    response = await agent.get_response(
+                        messages=user_message,
+                        arguments=KernelArguments(settings=execution_settings),
+                    )
+                except Exception as schema_exc:
+                    if not is_schema_response_format_unsupported(schema_exc):
+                        raise
+                    fallback_settings = AzureChatPromptExecutionSettings(
+                        tool_choice="auto",
+                        parallel_tool_calls=False,
+                    )
+                    response = await agent.get_response(
+                        messages=user_message,
+                        arguments=KernelArguments(settings=fallback_settings),
+                    )
             await present_itinerary(console, str(response.message.content))
     except Exception as exc:
         console.print(Panel(str(exc), title="Errore avvio/esecuzione", border_style="red"))
