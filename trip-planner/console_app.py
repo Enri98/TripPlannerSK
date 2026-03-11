@@ -24,32 +24,31 @@ from orchestrator.main import (
 
 
 class ActivityItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     name: str
     type: str
     description: str
 
 
-class ActivityResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RpcError(BaseModel):
+    code: int | str
+    message: str
 
-    activities: list[ActivityItem]
+
+class ActivityResponse(BaseModel):
+    activities: list[ActivityItem] | None = None
+    error: RpcError | dict | None = None
     note: str | None = None
 
 
 class RestaurantItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     name: str
     type: str
     price_range: str
 
 
 class RestaurantResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    restaurants: list[RestaurantItem]
+    restaurants: list[RestaurantItem] | None = None
+    error: RpcError | dict | None = None
     note: str | None = None
 
 
@@ -180,29 +179,47 @@ async def present_itinerary(console: Console, raw_json: str) -> None:
     if note:
         console.print(Panel(note, title="Note", border_style="yellow"))
 
-    activities_table = Table(title="Activities")
-    activities_table.add_column("Name", style="bold")
-    activities_table.add_column("Type")
-    activities_table.add_column("Description")
-
-    if itinerary.activity_suggestions.activities:
-        for activity in itinerary.activity_suggestions.activities:
-            activities_table.add_row(activity.name, activity.type, activity.description)
+    if itinerary.activity_suggestions.error:
+        error_obj = itinerary.activity_suggestions.error
+        error_text = (
+            json.dumps(error_obj.model_dump(mode="json"), indent=2, ensure_ascii=True)
+            if isinstance(error_obj, RpcError)
+            else json.dumps(error_obj, indent=2, ensure_ascii=True)
+        )
+        console.print(Panel(error_text, title="Service Unavailable: Activities", border_style="red"))
     else:
-        activities_table.add_row("-", "-", "No activities available.")
-    console.print(activities_table)
+        activities_table = Table(title="Activities")
+        activities_table.add_column("Name", style="bold")
+        activities_table.add_column("Type")
+        activities_table.add_column("Description")
 
-    restaurants_table = Table(title="Restaurants")
-    restaurants_table.add_column("Name", style="bold")
-    restaurants_table.add_column("Cuisine")
-    restaurants_table.add_column("Price Range")
+        if itinerary.activity_suggestions.activities:
+            for activity in itinerary.activity_suggestions.activities:
+                activities_table.add_row(activity.name, activity.type, activity.description)
+        else:
+            activities_table.add_row("-", "-", "No activities available.")
+        console.print(activities_table)
 
-    if itinerary.restaurant_recommendations.restaurants:
-        for restaurant in itinerary.restaurant_recommendations.restaurants:
-            restaurants_table.add_row(restaurant.name, restaurant.type, restaurant.price_range)
+    if itinerary.restaurant_recommendations.error:
+        error_obj = itinerary.restaurant_recommendations.error
+        error_text = (
+            json.dumps(error_obj.model_dump(mode="json"), indent=2, ensure_ascii=True)
+            if isinstance(error_obj, RpcError)
+            else json.dumps(error_obj, indent=2, ensure_ascii=True)
+        )
+        console.print(Panel(error_text, title="Service Unavailable: Restaurants", border_style="red"))
     else:
-        restaurants_table.add_row("-", "-", "No restaurants available.")
-    console.print(restaurants_table)
+        restaurants_table = Table(title="Restaurants")
+        restaurants_table.add_column("Name", style="bold")
+        restaurants_table.add_column("Cuisine")
+        restaurants_table.add_column("Price Range")
+
+        if itinerary.restaurant_recommendations.restaurants:
+            for restaurant in itinerary.restaurant_recommendations.restaurants:
+                restaurants_table.add_row(restaurant.name, restaurant.type, restaurant.price_range)
+        else:
+            restaurants_table.add_row("-", "-", "No restaurants available.")
+        console.print(restaurants_table)
 
 
 async def read_destination() -> str:
