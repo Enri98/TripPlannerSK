@@ -34,17 +34,6 @@ Trip planner multi-agente con:
   - Server MCP con tool `get_available_cities` e `get_weather`.
   - `get_weather` supporta `today` o `YYYY-MM-DD` fino a +14 giorni.
 
-## Contratti dati principali
-
-- `TaskRequest` / `TaskRequestParams`: richiesta JSON-RPC agli agenti A2A.
-- `ActivityResponse`: `{ activities: [...], note?: str }`.
-- `RestaurantResponse`: `{ restaurants: [...], note?: str }`.
-- `AgentErrorPayload`: `{ error: { code, message, data? } }`.
-- `TripDirectorResponse`:
-  - `weather_data`
-  - `activity_suggestions` (`ActivityResponse` oppure `AgentErrorPayload`)
-  - `restaurant_recommendations` (`RestaurantResponse` oppure `AgentErrorPayload`)
-  - `note?`
 
 ## Prerequisiti
 
@@ -97,7 +86,7 @@ cd trip-planner
 
 Nota: non serve avviare `mcp-weather-server/server.py` a parte quando usi `console_app.py`; viene avviato come processo stdio tramite `MCPStdioPlugin`.
 
-## Flusso runtime
+## Flusso
 
 1. Utente inserisce destinazione in console.
 2. L'orchestratore invoca il tool MCP meteo (`WeatherMcp`).
@@ -120,9 +109,3 @@ Nota: non serve avviare `mcp-weather-server/server.py` a parte quando usi `conso
 - `Venezia`
 - `Firenze`
 - `Napoli`
-
-## Script di utilita
-
-- `exporter.py`
-  - Esporta struttura progetto e contenuto file in `project_export.txt`.
-  - Include file `.py`, `.md`, `.json`, `.toml`, `.env.example` (con alcuni filtri su cartelle/file).

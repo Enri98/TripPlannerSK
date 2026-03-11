@@ -19,14 +19,20 @@ def normalize_json_schema(schema: dict) -> dict:
             properties = node.get("properties")
             if isinstance(properties, dict):
                 node["required"] = list(properties.keys())
-                node.setdefault("additionalProperties", False)
+                node["additionalProperties"] = False
 
             if "anyOf" in node and isinstance(node["anyOf"], list):
-                variants = node["anyOf"]
-                non_null_variants = [item for item in variants if not (isinstance(item, dict) and item.get("type") == "null")]
-                if non_null_variants:
-                    node["oneOf"] = non_null_variants if len(non_null_variants) > 1 else non_null_variants
+                non_null_variants = [
+                    item
+                    for item in node["anyOf"]
+                    if not (isinstance(item, dict) and item.get("type") == "null")
+                ]
+                if len(non_null_variants) == 1 and isinstance(non_null_variants[0], dict):
                     node.pop("anyOf", None)
+                    for key, value in non_null_variants[0].items():
+                        node.setdefault(key, value)
+                elif non_null_variants:
+                    node["anyOf"] = non_null_variants
 
             for key in ("$defs", "definitions", "properties", "patternProperties", "dependentSchemas"):
                 child_map = node.get(key)
@@ -39,7 +45,7 @@ def normalize_json_schema(schema: dict) -> dict:
                 if child is not None:
                     node[key] = walk(child)
 
-            for key in ("allOf", "oneOf", "prefixItems"):
+            for key in ("allOf", "anyOf", "oneOf", "prefixItems"):
                 child_list = node.get(key)
                 if isinstance(child_list, list):
                     node[key] = [walk(child) for child in child_list]
