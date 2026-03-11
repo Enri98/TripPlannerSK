@@ -2,15 +2,14 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict
 from semantic_kernel import Kernel
 from semantic_kernel.agents import ChatCompletionAgent
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
 from semantic_kernel.connectors.mcp import MCPStdioPlugin
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChatPromptExecutionSettings
+from data_contracts import TripDirectorResponse
 from helpers import get_structured_output_settings
 
 try:
@@ -38,59 +37,6 @@ SYSTEM_INSTRUCTIONS = (
     "Se un agente/tool restituisce un oggetto error, preservalo nel campo corrispondente senza trasformarlo. "
     "I dati meteo possono essere 'Sconosciuto'; fornisci comunque attivita e ristoranti e aggiungi una nota esplicita."
 )
-
-
-class RpcError(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    code: int | str
-    message: str
-    data: dict[str, Any] | list[Any] | str | None = None
-
-
-class AgentErrorPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    error: RpcError
-
-
-class ActivityItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    type: str
-    description: str
-
-
-class ActivityResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    activities: list[ActivityItem]
-    note: str | None = None
-
-
-class RestaurantItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    type: str
-    price_range: str
-
-
-class RestaurantResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    restaurants: list[RestaurantItem]
-    note: str | None = None
-
-
-class TripDirectorResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    weather_data: str | dict[str, Any] | list[Any]
-    activity_suggestions: ActivityResponse | AgentErrorPayload
-    restaurant_recommendations: RestaurantResponse | AgentErrorPayload
-    note: str | None = None
 
 
 def configure_logging() -> None:

@@ -7,48 +7,21 @@ from typing import Optional
 from anyio import Path as AnyioPath
 from dotenv import load_dotenv
 from fastapi import FastAPI, Response
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import ValidationError
 from semantic_kernel import Kernel
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChatPromptExecutionSettings
 from semantic_kernel.functions import KernelArguments, kernel_function
 import uvicorn
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+if str(Path(__file__).parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from data_contracts import RestaurantResponse, TaskRequest
 from helpers import create_rpc_error, get_structured_output_settings, is_schema_response_format_unsupported
 from memory import RESTAURANT_DB
 
 app = FastAPI()
-
-
-class TaskRequestParams(BaseModel):
-    city: str
-    cuisine_type: str
-
-
-class TaskRequest(BaseModel):
-    jsonrpc: str
-    method: str
-    params: TaskRequestParams
-    id: Optional[int] = None
-
-
-class RestaurantItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    type: str
-    price_range: str
-
-
-class RestaurantResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    restaurants: list[RestaurantItem]
-    note: str | None = None
 
 
 BASE_DIR = Path(__file__).parent

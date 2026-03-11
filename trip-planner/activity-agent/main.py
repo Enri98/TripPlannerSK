@@ -6,7 +6,7 @@ from typing import Optional
 
 from anyio import Path as AnyioPath
 from fastapi import FastAPI, Response
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import ValidationError
 import uvicorn
 from semantic_kernel import Kernel
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
@@ -14,41 +14,15 @@ from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChat
 from dotenv import load_dotenv
 from semantic_kernel.functions import KernelArguments, kernel_function
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+if str(Path(__file__).parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from data_contracts import ActivityResponse, TaskRequest
 from helpers import create_rpc_error, get_structured_output_settings, is_schema_response_format_unsupported
 from memory import ACTIVITIES_DB
 
 # --- FastAPI App Initialization ---
 app = FastAPI()
-
-# --- Pydantic Models ---
-class TaskRequestParams(BaseModel):
-    city: str
-    weather: str
-
-class TaskRequest(BaseModel):
-    jsonrpc: str
-    method: str
-    params: TaskRequestParams
-    id: Optional[int] = None
-
-
-class ActivityItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    type: str
-    description: str
-
-
-class ActivityResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    activities: list[ActivityItem]
-    note: str | None = None
 
 
 # --- File Paths ---

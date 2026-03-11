@@ -1,42 +1,56 @@
-# Trip Planner Agentico (Semantic Kernel 1.40)
+# Trip Planner Agentico
 
-Questo progetto implementa un trip planner multi-agente con orchestrazione automatica tramite Semantic Kernel 1.40.
+Trip planner multi-agente con:
+- orchestratore Semantic Kernel
+- due agenti A2A (attivita e ristoranti)
+- tool meteo MCP (FastMCP + Open-Meteo)
+- interfaccia utente console (`trip-planner/console_app.py`)
 
-## Architettura
+## Struttura progetto
 
-Componenti principali:
+- `trip-planner/console_app.py`
+  - Entry point CLI reale.
+  - Inizializza orchestratore + `DiscoveryPlugin` + plugin MCP meteo.
+  - Mostra output in console con `rich`
+- `trip-planner/orchestrator/main.py`
+  - Modulo di orchestrazione
+  - Costruisce kernel, agent orchestratore, execution settings e plugin MCP.
+- `trip-planner/orchestrator/plugins/discovery_plugin.py`
+  - Discovery A2A via `/.well-known/agent-card.json`.
+  - Chiamata `/task` JSON-RPC e validazione envelope/schema risultato.
+- `trip-planner/activity-agent/`
+  - FastAPI su porta `8081`.
+  - Endpoint: `/.well-known/agent-card.json`, `/task`.
+  - Tool locale: `ActivitySearch.get_activities(city, weather)`.
+- `trip-planner/restaurant-agent/`
+  - FastAPI su porta `8082`.
+  - Endpoint: `/.well-known/agent-card.json`, `/task`.
+  - Tool locale: `RestaurantSearch.get_restaurants(city, cuisine)`.
+- `trip-planner/data_contracts.py`
+  - Contratti Pydantic condivisi (RPC + payload agenti + output finale).
+- `trip-planner/helpers.py`
+  - Normalizzazione JSON Schema strict + utility error handling.
+- `mcp-weather-server/server.py`
+  - Server MCP con tool `get_available_cities` e `get_weather`.
+  - `get_weather` supporta `today` o `YYYY-MM-DD` fino a +14 giorni.
 
-1. `mcp-weather-server`
-- Server MCP (FastMCP) per meteo.
-- Tool principale: `get_weather(city, date="today")`.
-- Supporta richieste da oggi fino a 14 giorni nel futuro.
-- Se la data supera la finestra di previsione restituisce: `{"error": "forecast_limit", "message": "I dati meteo sono disponibili solo per i prossimi 14 giorni."}`.
+## Contratti dati principali
 
-2. `trip-planner/activity-agent`
-- Agente A2A (FastAPI, porta `8081`).
-- Espone `/.well-known/agent-card.json` e `/task`.
-- Suggerisce attivita in base a citta + meteo.
-- Usa Structured Outputs con JSON Schema derivato da Pydantic (`ActivityResponse`).
-- Valida sempre l'output LLM con `model_validate` prima di rispondere.
-
-3. `trip-planner/restaurant-agent`
-- Agente A2A (FastAPI, porta `8082`).
-- Espone `/.well-known/agent-card.json` e `/task`.
-- Suggerisce ristoranti in base a citta + preferenza cucina.
-- Usa Structured Outputs con JSON Schema derivato da Pydantic (`RestaurantResponse`).
-- Valida sempre l'output LLM con `model_validate` prima di rispondere.
-
-4. `trip-planner/orchestrator`
-- Console app con `ChatCompletionAgent` (SK 1.40).
-- Usa `FunctionChoiceBehavior.Auto(auto_invoke=True)`.
-- Usa MCP per il meteo + DiscoveryPlugin per chiamare ActivityAgent e RestaurantAgent.
-- Usa Structured Outputs con contratto finale `TripDirectorResponse`.
-- La risposta finale contiene sempre: `weather_data`, `activity_suggestions`, `restaurant_recommendations` (piu `note` opzionale).
+- `TaskRequest` / `TaskRequestParams`: richiesta JSON-RPC agli agenti A2A.
+- `ActivityResponse`: `{ activities: [...], note?: str }`.
+- `RestaurantResponse`: `{ restaurants: [...], note?: str }`.
+- `AgentErrorPayload`: `{ error: { code, message, data? } }`.
+- `TripDirectorResponse`:
+  - `weather_data`
+  - `activity_suggestions` (`ActivityResponse` oppure `AgentErrorPayload`)
+  - `restaurant_recommendations` (`RestaurantResponse` oppure `AgentErrorPayload`)
+  - `note?`
 
 ## Prerequisiti
 
 - Python 3.11+
-- Virtual environment condiviso in `trip-planner/.venv`
+- Virtual environment in `trip-planner/.venv`
+- Virtual environment in `mcp-weather-server/.venv`
 - Variabili in `.env` (root progetto):
   - `AZURE_OPENAI_ENDPOINT`
   - `AZURE_OPENAI_API_KEY`
@@ -44,63 +58,71 @@ Componenti principali:
   - `AZURE_OPENAI_MODEL`
   - `API_VERSION`
 
-## Avvio rapido (Windows / PowerShell)
+File di esempio: `.env.example`.
 
-Apri 4 terminali dalla root del progetto `ESAME/`.
+## Installazione dipendenze
 
-### Terminale 1: Weather MCP Server
+Dalla root del progetto:
 
 ```powershell
-cd mcp-weather-server
-..\trip-planner\.venv\Scripts\python.exe .\server.py
+trip-planner\.venv\Scripts\python.exe -m pip install -r .\trip-planner\requirements.txt
+
+mcp-weather-server\.venv\Scripts\python.exe -m pip install -r .\mcp-weather-server\requirements.txt
 ```
 
-### Terminale 2: Activity Agent
+## Avvio
+
+Apri 3 terminali dalla root
+
+### Terminale 1 - Activity Agent
 
 ```powershell
 cd trip-planner\activity-agent
 ..\.venv\Scripts\python.exe .\main.py
 ```
 
-### Terminale 3: Restaurant Agent
+### Terminale 2 - Restaurant Agent
 
 ```powershell
 cd trip-planner\restaurant-agent
 ..\.venv\Scripts\python.exe .\main.py
 ```
 
-### Terminale 4: Orchestrator Console
+### Terminale 3 - Console App (orchestratore + MCP)
 
 ```powershell
-cd trip-planner\orchestrator
-..\.venv\Scripts\python.exe .\main.py
+cd trip-planner
+.\.venv\Scripts\python.exe .\console_app.py
 ```
 
-## Flusso logico
+Nota: non serve avviare `mcp-weather-server/server.py` a parte quando usi `console_app.py`; viene avviato come processo stdio tramite `MCPStdioPlugin`.
 
-1. L'utente inserisce richiesta viaggio in console.
-2. Orchestrator chiama `WeatherMcp` per ottenere il meteo.
-3. Orchestrator chiama `ActivityAgent` via discovery A2A (`8081`).
-4. Orchestrator chiama `RestaurantAgent` via discovery A2A (`8082`).
-5. Orchestrator produce JSON strutturato (`TripDirectorResponse`) e lo presenta in formato leggibile.
+## Flusso runtime
 
-## Contratti e validazione
+1. Utente inserisce destinazione in console.
+2. L'orchestratore invoca il tool MCP meteo (`WeatherMcp`).
+3. Chiama ActivityAgent e RestaurantAgent tramite `DiscoveryPlugin`.
+4. Valida output finale con `TripDirectorResponse`.
+5. Renderizza meteo, nota ed elenchi in tabelle `rich`.
 
-- I due agenti A2A usano `response_format={"type":"json_schema","json_schema":...}`.
-- Gli schema sono normalizzati per compatibilita Azure/OpenAI strict (`required` include tutte le chiavi in `properties`).
-- Se il deployment non supporta `json_schema`, gli agenti effettuano fallback a chiamata senza schema ma mantengono validazione Pydantic post-invoke.
-- Nessun parsing markdown: gli output LLM vengono decodificati con `json.loads(...)` direttamente.
-- In caso di output non valido, gli agenti restituiscono errore JSON-RPC strutturato (non crashano).
+## fallback
 
-## Discovery Plugin
+- Structured Outputs: usati dove possibile con schema Pydantic normalizzato.
+- Fallback automatico se `response_format=json_schema` non e supportato dal deployment
+- Validazione post-LLM con Pydantic.
+- Errori agente/tool conservati in forma strutturata (`error`)
+- Se il meteo non e disponibile, il flusso prosegue con `weather='Sconosciuto'`.
 
-- `DiscoveryPlugin` risolve dinamicamente gli endpoint leggendo le `agent-card`.
-- `_post_task` valida envelope JSON-RPC (`jsonrpc`, `result`/`error`) e schema del `result`.
-- Se la risposta agente non rispetta lo schema, il plugin restituisce un errore strutturato (`..._invalid_result_schema`).
-- I metodi tool ritornano sempre stringhe JSON serializzate verso l'orchestrator.
+## Citta supportate (dataset locale)
 
-## Note operative
+- `Roma`
+- `Milano`
+- `Venezia`
+- `Firenze`
+- `Napoli`
 
-- Se il meteo fallisce o supera la finestra supportata, l'orchestrator prosegue con `weather='Sconosciuto'` per ActivityAgent.
-- Se un agente A2A non e raggiungibile o restituisce payload non valido, il plugin restituisce un errore JSON strutturato.
-- L'orchestrator comunica con gli agenti solo tramite `DiscoveryPlugin`.
+## Script di utilita
+
+- `exporter.py`
+  - Esporta struttura progetto e contenuto file in `project_export.txt`.
+  - Include file `.py`, `.md`, `.json`, `.toml`, `.env.example` (con alcuni filtri su cartelle/file).

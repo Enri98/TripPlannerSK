@@ -12,13 +12,10 @@ from semantic_kernel.connectors.ai.open_ai import AzureChatPromptExecutionSettin
 from semantic_kernel.connectors.mcp import MCPStdioPlugin
 from semantic_kernel.functions import KernelArguments
 
+from data_contracts import ActivityResponse, AgentErrorPayload, RestaurantResponse, TripDirectorResponse
 from helpers import is_schema_response_format_unsupported
 from orchestrator.main import (
-    ActivityResponse,
-    AgentErrorPayload,
     DiscoveryPlugin,
-    RestaurantResponse,
-    TripDirectorResponse,
     build_execution_settings,
     build_kernel,
     build_orchestrator_agent,

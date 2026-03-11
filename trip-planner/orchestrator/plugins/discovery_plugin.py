@@ -5,62 +5,12 @@ import logging
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ValidationError
 from semantic_kernel.functions import kernel_function
 
+from data_contracts import ActivityResponse, RestaurantResponse, RpcEnvelope
+
 LOGGER = logging.getLogger(__name__)
-
-
-class RpcError(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    code: int | str
-    message: str
-    data: dict[str, Any] | list[Any] | str | None = None
-
-
-class RpcEnvelope(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    jsonrpc: str
-    id: int | str | None = None
-    result: dict[str, Any] | None = None
-    error: RpcError | None = None
-
-
-class ActivityItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    type: str
-    description: str
-
-
-class ActivityResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    activities: list[ActivityItem]
-    note: str | None = None
-
-
-class RestaurantItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    type: str
-    price_range: str
-
-
-class RestaurantResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    restaurants: list[RestaurantItem]
-    note: str | None = None
-
-
-RpcEnvelope.model_rebuild()
-ActivityResponse.model_rebuild()
-RestaurantResponse.model_rebuild()
 
 
 class AgentCardResolver:
