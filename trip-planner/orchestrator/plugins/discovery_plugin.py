@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -8,7 +7,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 from semantic_kernel.functions import kernel_function
 
-from data_contracts import ActivityResponse, RestaurantResponse, RpcEnvelope
+from data_contracts import AgentTextResponse, RpcEnvelope
 
 LOGGER = logging.getLogger(__name__)
 
@@ -182,18 +181,23 @@ class DiscoveryPlugin:
             self._activity_resolver,
             payload,
             "activity_agent",
-            expected_result_model=ActivityResponse,
+            expected_result_model=AgentTextResponse,
         )
-        return json.dumps(result, ensure_ascii=True)
+        if "error" in result:
+            message = result["error"].get("message", "Errore sconosciuto")
+            return f"Servizio attivita non disponibile: {message}"
 
-    @kernel_function(description="Chiama RestaurantAgent con citta e preferenza di cucina.")
-    async def call_restaurant_agent(self, city: str, cuisine_preference: str) -> str:
+        return str(result["reply"])
+
+    @kernel_function(description="Chiama RestaurantAgent con citta, preferenza di cucina e budget.")
+    async def call_restaurant_agent(self, city: str, cuisine_preference: str, budget: str | None = None) -> str:
         payload = {
             "jsonrpc": "2.0",
             "method": "suggest_restaurant",
             "params": {
                 "city": city,
                 "cuisine_type": cuisine_preference,
+                "budget": budget,
             },
             "id": 1,
         }
@@ -201,6 +205,10 @@ class DiscoveryPlugin:
             self._restaurant_resolver,
             payload,
             "restaurant_agent",
-            expected_result_model=RestaurantResponse,
+            expected_result_model=AgentTextResponse,
         )
-        return json.dumps(result, ensure_ascii=True)
+        if "error" in result:
+            message = result["error"].get("message", "Errore sconosciuto")
+            return f"Servizio ristoranti non disponibile: {message}"
+
+        return str(result["reply"])

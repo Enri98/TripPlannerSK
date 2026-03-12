@@ -11,6 +11,7 @@ class TaskRequestParams(BaseModel):
     city: str
     weather: str | None = None
     cuisine_type: str | None = None
+    budget: str | None = None
 
 
 class TaskRequest(BaseModel):
@@ -36,34 +37,10 @@ class AgentErrorPayload(BaseModel):
     error: RpcError
 
 
-class ActivityItem(BaseModel):
+class AgentTextResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    name: str
-    type: str
-    description: str
-
-
-class ActivityResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    activities: list[ActivityItem]
-    note: str | None = None
-
-
-class RestaurantItem(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    name: str
-    type: str
-    price_range: str
-
-
-class RestaurantResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    restaurants: list[RestaurantItem]
-    note: str | None = None
+    reply: str
 
 
 class RpcEnvelope(BaseModel):
@@ -73,12 +50,3 @@ class RpcEnvelope(BaseModel):
     id: int | str | None = None
     result: dict[str, Any] | None = None
     error: RpcError | None = None
-
-
-class TripDirectorResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    weather_data: str | dict[str, Any] | list[Any]
-    activity_suggestions: ActivityResponse | AgentErrorPayload
-    restaurant_recommendations: RestaurantResponse | AgentErrorPayload
-    note: str | None = None

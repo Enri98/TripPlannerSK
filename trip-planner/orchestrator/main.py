@@ -4,39 +4,39 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict
 from semantic_kernel import Kernel
 from semantic_kernel.agents import ChatCompletionAgent
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
-from semantic_kernel.connectors.mcp import MCPStdioPlugin
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChatPromptExecutionSettings
-from data_contracts import TripDirectorResponse
+from semantic_kernel.connectors.mcp import MCPStdioPlugin
+
 from helpers import get_structured_output_settings
 
-try:
-    from orchestrator.plugins.discovery_plugin import DiscoveryPlugin
-except ImportError:
-    from plugins.discovery_plugin import DiscoveryPlugin
-
 LOGGER = logging.getLogger("trip_orchestrator")
-SYSTEM_INSTRUCTIONS = (
-    "Sei il Direttore del Viaggio. "
-    "Devi rispondere sempre in italiano. "
-    "1. Ottieni il meteo. "
-    "2. Ottieni attivita. "
-    "3. Ottieni suggerimenti ristorante. "
-    "Devi tentare di ottenere i dati meteo dal tool WeatherMcp prima di chiamare ActivityAgent. "
-    "Per il parametro weather di ActivityAgent usa solo e soltanto l'output esatto del tool meteo, con le descrizioni meteo in italiano fornite dal tool stesso. "
-    "Se WeatherMcp restituisce un errore di limite previsione o qualsiasi altro errore, non fermarti. "
-    "Prosegui chiamando ActivityAgent con weather='Sconosciuto' in una richiesta JSON-RPC valida e chiama normalmente RestaurantAgent. "
-    "Nella risposta finale usa rigorosamente il contratto TripDirectorResponse. "
-    "4. Mappa i risultati nei campi obbligatori: weather_data, activity_suggestions e restaurant_recommendations. "
-    "activity_suggestions deve contenere esattamente il payload restituito da ActivityAgent: "
-    "oppure {activities, note opzionale} oppure {error}. "
-    "restaurant_recommendations deve contenere esattamente il payload restituito da RestaurantAgent: "
-    "oppure {restaurants, note opzionale} oppure {error}. "
-    "Se un agente/tool restituisce un oggetto error, preservalo nel campo corrispondente senza trasformarlo. "
-    "I dati meteo possono essere 'Sconosciuto'; fornisci comunque attivita e ristoranti e aggiungi una nota esplicita."
+
+PLANNER_SYSTEM_PROMPT = (
+    "Sei l'analista. Chiama il tool meteo per la citta. "
+    "Genera SOLO un JSON interno (non all'utente) con: city, weather, cuisine (opzionale), budget (opzionale). "
+    "Estrai city, cuisine e budget dalla richiesta utente quando presenti. "
+    "Chiama sempre il tool meteo per la city estratta. "
+    "Se il meteo non e disponibile o il tool fallisce, imposta weather a 'Sconosciuto'. "
+    "Rispondi solo con il JSON richiesto."
 )
+
+SYNTHESIZER_SYSTEM_PROMPT = (
+    "Sei il Direttore di Viaggio. Ricevi il meteo, le risposte dell'agente attivita e dell'agente ristoranti. "
+    "Unisci tutto in un discorso fluido, formattato in Markdown, coerente e diretto all'utente finale."
+)
+
+
+class PlannerOutput(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    city: str
+    weather: str
+    cuisine: str | None = None
+    budget: str | None = None
 
 
 def configure_logging() -> None:
@@ -53,29 +53,63 @@ def load_environment() -> None:
     LOGGER.info("Loaded environment", extra={"env_path": str(env_path)})
 
 
-def build_kernel(travel_services_plugin: DiscoveryPlugin) -> Kernel:
-    kernel = Kernel()
-
-    chat_service = AzureChatCompletion(
+def _build_chat_service() -> AzureChatCompletion:
+    return AzureChatCompletion(
         deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
         endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         api_version=os.getenv("API_VERSION"),
     )
-    kernel.add_service(chat_service)
 
-    kernel.add_plugin(travel_services_plugin, plugin_name="TravelServices")
 
+def build_planner_kernel(weather_plugin: MCPStdioPlugin) -> Kernel:
+    kernel = Kernel()
+    kernel.add_service(_build_chat_service())
+    kernel.add_plugin(weather_plugin)
     return kernel
 
 
-def build_system_instructions() -> str:
+def build_synthesizer_kernel() -> Kernel:
+    kernel = Kernel()
+    kernel.add_service(_build_chat_service())
+    return kernel
+
+
+def build_planner_instructions() -> str:
     now = datetime.now()
     return (
-        f"{SYSTEM_INSTRUCTIONS} "
-        f"La data di oggi e {now.strftime('%Y-%m-%d')}. "
-        f"L'ora locale corrente e {now.strftime('%H:%M:%S')}."
+        f"{PLANNER_SYSTEM_PROMPT} "
+        f"La data di oggi e {now.strftime('%Y-%m-%d')} e l'ora locale e {now.strftime('%H:%M:%S')}."
     )
+
+
+def build_planner_agent(kernel: Kernel) -> ChatCompletionAgent:
+    return ChatCompletionAgent(
+        name="PlannerAgent",
+        instructions=build_planner_instructions(),
+        kernel=kernel,
+        function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
+    )
+
+
+def build_synthesizer_agent(kernel: Kernel) -> ChatCompletionAgent:
+    return ChatCompletionAgent(
+        name="SynthesizerAgent",
+        instructions=SYNTHESIZER_SYSTEM_PROMPT,
+        kernel=kernel,
+    )
+
+
+def build_planner_execution_settings() -> AzureChatPromptExecutionSettings:
+    return AzureChatPromptExecutionSettings(
+        tool_choice="auto",
+        parallel_tool_calls=False,
+        response_format=get_structured_output_settings(PlannerOutput),
+    )
+
+
+def build_synthesizer_execution_settings() -> AzureChatPromptExecutionSettings:
+    return AzureChatPromptExecutionSettings()
 
 
 def build_weather_mcp_plugin() -> MCPStdioPlugin:
@@ -94,21 +128,4 @@ def build_weather_mcp_plugin() -> MCPStdioPlugin:
         command=str(python_executable),
         args=[str(weather_server_script)],
         request_timeout=30,
-    )
-
-
-def build_orchestrator_agent(kernel: Kernel) -> ChatCompletionAgent:
-    return ChatCompletionAgent(
-        name="TripOrchestrator",
-        instructions=build_system_instructions(),
-        kernel=kernel,
-        function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
-    )
-
-
-def build_execution_settings() -> AzureChatPromptExecutionSettings:
-    return AzureChatPromptExecutionSettings(
-        tool_choice="auto",
-        parallel_tool_calls=False,
-        response_format=get_structured_output_settings(TripDirectorResponse),
     )

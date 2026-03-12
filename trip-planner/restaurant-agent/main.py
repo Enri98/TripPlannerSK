@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -7,7 +8,6 @@ from typing import Optional
 from anyio import Path as AnyioPath
 from dotenv import load_dotenv
 from fastapi import FastAPI, Response
-from pydantic import ValidationError
 from semantic_kernel import Kernel
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, AzureChatPromptExecutionSettings
@@ -17,8 +17,8 @@ import uvicorn
 if str(Path(__file__).parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from data_contracts import RestaurantResponse, TaskRequest
-from helpers import create_rpc_error, get_structured_output_settings, is_schema_response_format_unsupported
+from data_contracts import TaskRequest
+from helpers import create_rpc_error
 from memory import RESTAURANT_DB
 
 app = FastAPI()
@@ -46,8 +46,42 @@ class RestaurantSearchPlugin:
                 return key
         return None
 
-    @kernel_function(description="Restituisce ristoranti filtrati per citta e tipo di cucina.")
-    async def get_restaurants(self, city: str, cuisine: str) -> list[dict]:
+    @staticmethod
+    def _extract_price_bounds(price_range: str) -> tuple[int, int] | None:
+        values = [int(match) for match in re.findall(r"\d+", price_range)]
+        if not values:
+            return None
+        if len(values) == 1:
+            return values[0], values[0]
+        return values[0], values[-1]
+
+    def _matches_budget(self, price_range: str, budget: str) -> bool:
+        normalized_budget = self._normalize(budget)
+        if normalized_budget in {"", "any", "all", "none", "qualsiasi", "non specificato"}:
+            return True
+
+        bounds = self._extract_price_bounds(price_range)
+        if bounds is None:
+            return True
+
+        min_price, max_price = bounds
+
+        if any(token in normalized_budget for token in {"economico", "cheap", "basso", "low"}):
+            return max_price <= 25
+        if any(token in normalized_budget for token in {"medio", "moderato", "medium"}):
+            return 18 <= min_price <= 45
+        if any(token in normalized_budget for token in {"alto", "premium", "lusso", "high"}):
+            return max_price >= 45
+
+        number_match = re.search(r"\d+", normalized_budget)
+        if number_match:
+            target = int(number_match.group(0))
+            return min_price <= target and max_price <= target + 10
+
+        return True
+
+    @kernel_function(description="Restituisce ristoranti filtrati per citta, tipo di cucina e budget.")
+    async def get_restaurants(self, city: str, cuisine: str, budget: str) -> list[dict]:
         city_key = self._resolve_city_key(city)
         if not city_key:
             return []
@@ -55,13 +89,19 @@ class RestaurantSearchPlugin:
         restaurants = RESTAURANT_DB.get(city_key, [])
         normalized_cuisine = self._normalize(cuisine)
         if normalized_cuisine in {"", "any", "all"}:
-            return restaurants
+            cuisine_filtered = restaurants
+        else:
+            cuisine_filtered = [
+                item
+                for item in restaurants
+                if normalized_cuisine in self._normalize(item.get("cuisine_type", ""))
+                or normalized_cuisine in self._normalize(item.get("type", ""))
+            ]
 
         return [
             item
-            for item in restaurants
-            if normalized_cuisine in self._normalize(item.get("cuisine_type", ""))
-            or normalized_cuisine in self._normalize(item.get("type", ""))
+            for item in cuisine_filtered
+            if self._matches_budget(item.get("price_range", ""), budget)
         ]
 
 
@@ -86,7 +126,8 @@ async def get_agent_card() -> Response:
 @app.post("/task")
 async def suggest_restaurant(request: TaskRequest):
     city = request.params.city
-    cuisine_type = request.params.cuisine_type
+    cuisine_type = request.params.cuisine_type or "any"
+    budget = request.params.budget or "any"
 
     if RestaurantSearchPlugin._resolve_city_key(city) is None:
         return create_rpc_error(-32602, "Citta non supportata", request.id)
@@ -112,30 +153,18 @@ async def suggest_restaurant(request: TaskRequest):
         execution_settings = AzureChatPromptExecutionSettings(
             tool_choice="auto",
             parallel_tool_calls=False,
-            response_format=get_structured_output_settings(RestaurantResponse),
             function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
         )
 
-        try:
-            result = await kernel.invoke(
-                chat_function,
-                KernelArguments(settings=execution_settings, city=city, cuisine=cuisine_type),
-            )
-        except Exception as schema_exc:
-            if not is_schema_response_format_unsupported(schema_exc):
-                raise
-
-            print(f"WARNING: json_schema response_format non supportato dal deployment: {schema_exc}")
-            fallback_settings = AzureChatPromptExecutionSettings(
-                tool_choice="auto",
-                parallel_tool_calls=False,
-                function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
-            )
-            result = await kernel.invoke(
-                chat_function,
-                KernelArguments(settings=fallback_settings, city=city, cuisine=cuisine_type),
-            )
-
+        result = await kernel.invoke(
+            chat_function,
+            KernelArguments(
+                settings=execution_settings,
+                city=city,
+                cuisine=cuisine_type,
+                budget=budget,
+            ),
+        )
         result_str = str(result)
     except Exception as e:
         print(f"CRITICAL KERNEL ERROR: {type(e).__name__}: {str(e)}")
@@ -144,33 +173,9 @@ async def suggest_restaurant(request: TaskRequest):
 
         return create_rpc_error(-32603, f"Agente non disponibile: {str(e)}", request.id)
 
-    try:
-        selected = json.loads(result_str)
-        validated_response = RestaurantResponse.model_validate(selected)
-    except json.JSONDecodeError as e:
-        print(f"JSONDecodeError: {e}")
-        print(f"Malformed response: {result_str}")
-
-        error_payload = create_rpc_error(
-            -32603,
-            "Errore interno: impossibile decodificare il JSON dalla risposta AI.",
-            request.id,
-        )
-        error_payload["error"]["data"] = {"raw_response": result_str}
-        return error_payload
-    except ValidationError as e:
-        print(f"ValidationError: {e}")
-        error_payload = create_rpc_error(
-            -32603,
-            "Errore interno: schema di risposta non valido nell'output AI.",
-            request.id,
-        )
-        error_payload["error"]["data"] = {"validation_errors": e.errors(include_url=False)}
-        return error_payload
-
     return {
         "jsonrpc": "2.0",
-        "result": validated_response.model_dump(mode="json"),
+        "result": {"reply": result_str},
         "id": request.id,
     }
 

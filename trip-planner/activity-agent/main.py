@@ -6,7 +6,6 @@ from typing import Optional
 
 from anyio import Path as AnyioPath
 from fastapi import FastAPI, Response
-from pydantic import ValidationError
 import uvicorn
 from semantic_kernel import Kernel
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
@@ -17,8 +16,8 @@ from semantic_kernel.functions import KernelArguments, kernel_function
 if str(Path(__file__).parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from data_contracts import ActivityResponse, TaskRequest
-from helpers import create_rpc_error, get_structured_output_settings, is_schema_response_format_unsupported
+from data_contracts import TaskRequest
+from helpers import create_rpc_error
 from memory import ACTIVITIES_DB
 
 # --- FastAPI App Initialization ---
@@ -100,7 +99,7 @@ async def suggest_activity(request: TaskRequest):
     Suggests activities based on city and weather.
     """
     city = request.params.city
-    weather = request.params.weather
+    weather = request.params.weather or "Sconosciuto"
 
     # 1. Init Kernel
     kernel = Kernel()
@@ -131,30 +130,13 @@ async def suggest_activity(request: TaskRequest):
         execution_settings = AzureChatPromptExecutionSettings(
             tool_choice="auto",
             parallel_tool_calls=False,
-            response_format=get_structured_output_settings(ActivityResponse),
             function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
         )
 
-        try:
-            result = await kernel.invoke(
-                chat_function,
-                KernelArguments(settings=execution_settings, city=city, weather=weather),
-            )
-        except Exception as schema_exc:
-            if not is_schema_response_format_unsupported(schema_exc):
-                raise
-
-            print(f"WARNING: json_schema response_format non supportato dal deployment: {schema_exc}")
-            fallback_settings = AzureChatPromptExecutionSettings(
-                tool_choice="auto",
-                parallel_tool_calls=False,
-                function_choice_behavior=FunctionChoiceBehavior.Auto(auto_invoke=True),
-            )
-            result = await kernel.invoke(
-                chat_function,
-                KernelArguments(settings=fallback_settings, city=city, weather=weather),
-            )
-
+        result = await kernel.invoke(
+            chat_function,
+            KernelArguments(settings=execution_settings, city=city, weather=weather),
+        )
         result_str = str(result)
     except Exception as e:
         # LOG THE FULL ERROR TO CONSOLE
@@ -165,36 +147,9 @@ async def suggest_activity(request: TaskRequest):
 
         return create_rpc_error(-32603, f"Agente non disponibile: {str(e)}", request.id)
 
-    # --- Format and Return Response ---
-    try:
-        suggested_activities = json.loads(result_str)
-        validated_response = ActivityResponse.model_validate(suggested_activities)
-
-    except json.JSONDecodeError as e:
-        # Log the error for debugging
-        print(f"JSONDecodeError: {e}")
-        print(f"Malformed response: {str(result)}")
-
-        error_payload = create_rpc_error(
-            -32603,
-            "Errore interno: impossibile decodificare il JSON dalla risposta AI.",
-            request.id,
-        )
-        error_payload["error"]["data"] = {"raw_response": result_str}
-        return error_payload
-    except ValidationError as e:
-        print(f"ValidationError: {e}")
-        error_payload = create_rpc_error(
-            -32603,
-            "Errore interno: schema di risposta non valido nell'output AI.",
-            request.id,
-        )
-        error_payload["error"]["data"] = {"validation_errors": e.errors(include_url=False)}
-        return error_payload
-
     return {
         "jsonrpc": "2.0",
-        "result": validated_response.model_dump(mode="json"),
+        "result": {"reply": result_str},
         "id": request.id
     }
 
