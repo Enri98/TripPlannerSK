@@ -160,19 +160,12 @@ async def run_console_app() -> None:
                 console.print(Panel(str(exc), title="Errore Planner", border_style="red"))
                 continue
 
-            city = planner_data.city.strip()
-            weather = (planner_data.weather or "Sconosciuto").strip() or "Sconosciuto"
-            cuisine = (planner_data.cuisine or "any").strip() or "any"
-            budget = (planner_data.budget or "any").strip() or "any"
+            weather = planner_data.weather_context
 
             with console.status("[bold green]Sto interrogando gli agenti specializzati..."):
                 activity_reply, restaurant_reply = await asyncio.gather(
-                    discovery_plugin.call_activity_agent(city=city, weather=weather),
-                    discovery_plugin.call_restaurant_agent(
-                        city=city,
-                        cuisine_preference=cuisine,
-                        budget=budget,
-                    ),
+                    discovery_plugin.call_activity_agent(question=planner_data.activity_question),
+                    discovery_plugin.call_restaurant_agent(question=planner_data.restaurant_question),
                 )
 
             synthesis_input = (

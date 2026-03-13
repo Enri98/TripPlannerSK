@@ -166,14 +166,13 @@ class DiscoveryPlugin:
 
         return validated_result.model_dump(mode="json")
 
-    @kernel_function(description="Chiama ActivityAgent con contesto di citta e meteo.")
-    async def call_activity_agent(self, city: str, weather: str) -> str:
+    @kernel_function(description="Chiama ActivityAgent con una domanda in linguaggio naturale.")
+    async def call_activity_agent(self, question: str) -> str:
         payload = {
             "jsonrpc": "2.0",
             "method": "suggest_activity",
             "params": {
-                "city": city,
-                "weather": weather,
+                "question": question,
             },
             "id": 1,
         }
@@ -189,15 +188,13 @@ class DiscoveryPlugin:
 
         return str(result["reply"])
 
-    @kernel_function(description="Chiama RestaurantAgent con citta, preferenza di cucina e budget.")
-    async def call_restaurant_agent(self, city: str, cuisine_preference: str, budget: str | None = None) -> str:
+    @kernel_function(description="Chiama RestaurantAgent con una domanda in linguaggio naturale.")
+    async def call_restaurant_agent(self, question: str) -> str:
         payload = {
             "jsonrpc": "2.0",
             "method": "suggest_restaurant",
             "params": {
-                "city": city,
-                "cuisine_type": cuisine_preference,
-                "budget": budget,
+                "question": question,
             },
             "id": 1,
         }

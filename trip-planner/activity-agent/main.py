@@ -96,10 +96,9 @@ async def get_agent_card():
 @app.post("/task")
 async def suggest_activity(request: TaskRequest):
     """
-    Suggests activities based on city and weather.
+    Suggests activities based on a natural language question.
     """
-    city = request.params.city
-    weather = request.params.weather or "Sconosciuto"
+    question = request.params.question
 
     # 1. Init Kernel
     kernel = Kernel()
@@ -114,10 +113,6 @@ async def suggest_activity(request: TaskRequest):
     # Register the service directly. The kernel handles it as the default.
     kernel.add_service(ai_service)
     kernel.add_plugin(ActivitySearchPlugin(), plugin_name="ActivitySearch")
-
-    # --- Error Handling for Unsupported City ---
-    if ActivitySearchPlugin._resolve_city_key(city) is None:
-        return create_rpc_error(-32602, "Citta non supportata", request.id)
 
     # 3. Register Function from prompt
     chat_function = kernel.add_function(
@@ -135,7 +130,7 @@ async def suggest_activity(request: TaskRequest):
 
         result = await kernel.invoke(
             chat_function,
-            KernelArguments(settings=execution_settings, city=city, weather=weather),
+            KernelArguments(settings=execution_settings, question=question),
         )
         result_str = str(result)
     except Exception as e:

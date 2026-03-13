@@ -125,12 +125,7 @@ async def get_agent_card() -> Response:
 
 @app.post("/task")
 async def suggest_restaurant(request: TaskRequest):
-    city = request.params.city
-    cuisine_type = request.params.cuisine_type or "any"
-    budget = request.params.budget or "any"
-
-    if RestaurantSearchPlugin._resolve_city_key(city) is None:
-        return create_rpc_error(-32602, "Citta non supportata", request.id)
+    question = request.params.question
 
     kernel = Kernel()
 
@@ -160,9 +155,7 @@ async def suggest_restaurant(request: TaskRequest):
             chat_function,
             KernelArguments(
                 settings=execution_settings,
-                city=city,
-                cuisine=cuisine_type,
-                budget=budget,
+                question=question,
             ),
         )
         result_str = str(result)

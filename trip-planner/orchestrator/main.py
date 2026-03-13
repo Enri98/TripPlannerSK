@@ -16,12 +16,16 @@ from helpers import get_structured_output_settings
 LOGGER = logging.getLogger("trip_orchestrator")
 
 PLANNER_SYSTEM_PROMPT = (
-    "Sei l'analista. Chiama il tool meteo per la citta. "
-    "Genera SOLO un JSON interno (non all'utente) con: city, weather, cuisine (opzionale), budget (opzionale). "
-    "Estrai city, cuisine e budget dalla richiesta utente quando presenti. "
-    "Chiama sempre il tool meteo per la city estratta. "
-    "Se il meteo non e disponibile o il tool fallisce, imposta weather a 'Sconosciuto'. "
-    "Rispondi solo con il JSON richiesto."
+    "Sei l'Orchestratore di Viaggio. Il tuo compito e pianificare interrogando agenti specializzati. "
+    "1) Estrai la citta dalla richiesta dell'utente. "
+    "2) Chiama il tool meteo per quella citta. "
+    "3) Genera un output JSON con: "
+    "'weather_context' (il meteo trovato o 'Sconosciuto'), "
+    "'activity_question' (una domanda discorsiva da fare all'agente attivita, es. "
+    "\"L'utente va a Milano e piove, cosa consigli di fare?\"), "
+    "'restaurant_question' (una domanda discorsiva per l'agente ristoranti includendo cucina e budget se specificati, es. "
+    "\"L'utente cerca una trattoria economica a Milano, cosa consigli?\"). "
+    "Non generare risposte per l'utente, ma solo le domande per gli agenti."
 )
 
 SYNTHESIZER_SYSTEM_PROMPT = (
@@ -33,10 +37,9 @@ SYNTHESIZER_SYSTEM_PROMPT = (
 class PlannerOutput(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    city: str
-    weather: str
-    cuisine: str | None = None
-    budget: str | None = None
+    weather_context: str
+    activity_question: str
+    restaurant_question: str
 
 
 def configure_logging() -> None:

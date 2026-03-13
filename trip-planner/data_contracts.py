@@ -8,10 +8,7 @@ from pydantic import BaseModel, ConfigDict
 class TaskRequestParams(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    city: str
-    weather: str | None = None
-    cuisine_type: str | None = None
-    budget: str | None = None
+    question: str
 
 
 class TaskRequest(BaseModel):

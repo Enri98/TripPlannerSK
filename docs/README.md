@@ -1,67 +1,90 @@
 # Trip Planner Agentico
 
-Trip planner multi-agente con:
-- orchestratore Semantic Kernel
-- due agenti A2A (attivita e ristoranti)
-- tool meteo MCP (FastMCP + Open-Meteo)
-- interfaccia utente console (`trip-planner/console_app.py`)
+Trip planner multi-agente basato su Semantic Kernel `1.40` con orchestrazione a due fasi:
+- `PlannerAgent` (con tool meteo MCP)
+- `SynthesizerAgent` (solo testo, nessun tool)
+- due agenti A2A specializzati (`ActivityAgent`, `RestaurantAgent`)
+- interfaccia console (`trip-planner/console_app.py`)
+
+La comunicazione A2A e in linguaggio naturale: i worker ricevono solo `question`.
+
+## Architettura attuale
+
+### 1. Planner
+- Estrae la citta dalla richiesta utente.
+- Chiama `WeatherMcp.get_weather`.
+- Produce JSON strutturato interno con:
+  - `weather_context`
+  - `activity_question`
+  - `restaurant_question`
+
+### 2. Worker A2A
+- `DiscoveryPlugin` risolve gli endpoint via `/.well-known/agent-card.json`.
+- Invia JSON-RPC ai worker su `/task` con payload:
+  - `{"params": {"question": "..."} }`
+- I worker rispondono con:
+  - `{"result": {"reply": "testo naturale"}}`
+
+### 3. Synthesizer
+- Riceve: meteo + reply attività + reply ristoranti.
+- Genera risposta finale Markdown per l'utente.
 
 ## Struttura progetto
 
 - `trip-planner/console_app.py`
-  - Entry point CLI reale.
-  - Inizializza orchestratore + `DiscoveryPlugin` + plugin MCP meteo.
-  - Mostra output in console con `rich`
+  - Entry point CLI.
+  - Esegue il flusso Planner -> Worker -> Synthesizer.
+  - Render finale con `rich.Markdown`.
 - `trip-planner/orchestrator/main.py`
-  - Modulo di orchestrazione
-  - Costruisce kernel, agent orchestratore, execution settings e plugin MCP.
+  - Definisce prompt, modelli e factory per:
+    - `PlannerAgent`
+    - `SynthesizerAgent`
+    - kernel e settings di esecuzione.
 - `trip-planner/orchestrator/plugins/discovery_plugin.py`
-  - Discovery A2A via `/.well-known/agent-card.json`.
-  - Chiamata `/task` JSON-RPC e validazione envelope/schema risultato.
+  - Discovery A2A e chiamate JSON-RPC a `ActivityAgent` e `RestaurantAgent`.
+  - Validazione envelope RPC e `result.reply`.
 - `trip-planner/activity-agent/`
   - FastAPI su porta `8081`.
   - Endpoint: `/.well-known/agent-card.json`, `/task`.
+  - Input `/task`: `question`.
   - Tool locale: `ActivitySearch.get_activities(city, weather)`.
 - `trip-planner/restaurant-agent/`
   - FastAPI su porta `8082`.
   - Endpoint: `/.well-known/agent-card.json`, `/task`.
-  - Tool locale: `RestaurantSearch.get_restaurants(city, cuisine)`.
+  - Input `/task`: `question`.
+  - Tool locale: `RestaurantSearch.get_restaurants(city, cuisine, budget)`.
 - `trip-planner/data_contracts.py`
-  - Contratti Pydantic condivisi (RPC + payload agenti + output finale).
+  - Contratti condivisi RPC.
+  - `TaskRequestParams` con solo `question: str`.
 - `trip-planner/helpers.py`
-  - Normalizzazione JSON Schema strict + utility error handling.
+  - Utility Structured Outputs e gestione errori.
 - `mcp-weather-server/server.py`
-  - Server MCP con tool `get_available_cities` e `get_weather`.
-  - `get_weather` supporta `today` o `YYYY-MM-DD` fino a +14 giorni.
-
+  - Server MCP con `get_available_cities` e `get_weather`.
 
 ## Prerequisiti
 
 - Python 3.11+
 - Virtual environment in `trip-planner/.venv`
 - Virtual environment in `mcp-weather-server/.venv`
-- Variabili in `.env` (root progetto):
+- Variabili `.env` nella root:
   - `AZURE_OPENAI_ENDPOINT`
   - `AZURE_OPENAI_API_KEY`
   - `AZURE_OPENAI_DEPLOYMENT`
   - `AZURE_OPENAI_MODEL`
   - `API_VERSION`
 
-File di esempio: `.env.example`.
-
 ## Installazione dipendenze
 
-Dalla root del progetto:
+Dalla root:
 
 ```powershell
 trip-planner\.venv\Scripts\python.exe -m pip install -r .\trip-planner\requirements.txt
-
 mcp-weather-server\.venv\Scripts\python.exe -m pip install -r .\mcp-weather-server\requirements.txt
 ```
 
 ## Avvio
 
-Apri 3 terminali dalla root
+Apri 3 terminali dalla root.
 
 ### Terminale 1 - Activity Agent
 
@@ -77,30 +100,24 @@ cd trip-planner\restaurant-agent
 ..\.venv\Scripts\python.exe .\main.py
 ```
 
-### Terminale 3 - Console App (orchestratore + MCP)
+### Terminale 3 - Console App
 
 ```powershell
 cd trip-planner
 .\.venv\Scripts\python.exe .\console_app.py
 ```
 
-Nota: non serve avviare `mcp-weather-server/server.py` a parte quando usi `console_app.py`; viene avviato come processo stdio tramite `MCPStdioPlugin`.
+Nota: il server MCP meteo non va avviato separatamente; viene avviato via `MCPStdioPlugin`.
 
-## Flusso
+## Flusso runtime
 
-1. Utente inserisce destinazione in console.
-2. L'orchestratore invoca il tool MCP meteo (`WeatherMcp`).
-3. Chiama ActivityAgent e RestaurantAgent tramite `DiscoveryPlugin`.
-4. Valida output finale con `TripDirectorResponse`.
-5. Renderizza meteo, nota ed elenchi in tabelle `rich`.
-
-## fallback
-
-- Structured Outputs: usati dove possibile con schema Pydantic normalizzato.
-- Fallback automatico se `response_format=json_schema` non e supportato dal deployment
-- Validazione post-LLM con Pydantic.
-- Errori agente/tool conservati in forma strutturata (`error`)
-- Se il meteo non e disponibile, il flusso prosegue con `weather='Sconosciuto'`.
+1. L'utente inserisce una richiesta libera in console.
+2. Il `PlannerAgent` usa il tool meteo e produce:
+   - `weather_context`
+   - `activity_question`
+   - `restaurant_question`
+3. `DiscoveryPlugin` invia le due domande testuali agli agenti A2A.
+4. Il `SynthesizerAgent` unisce tutto e restituisce il piano in Markdown.
 
 ## Citta supportate (dataset locale)
 
